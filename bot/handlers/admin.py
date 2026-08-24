@@ -1,0 +1,530 @@
+"""
+bot/handlers/admin.py — Handler Panel Administrator.
+===================================================
+Berisi perintah dan kontrol administratif khusus untuk owner/admin bot.
+Termasuk broadcast, statistik, set spread, un/ban, list pending order, dan konfirmasi order.
+"""
+
+import logging
+from datetime import datetime, timezone
+from telegram import Update
+from telegram.ext import ContextTypes
+
+from config.settings import settings
+from database.connection import SessionLocal
+from database.models import User, Order
+from database import crud
+from services.crypto_sender import CryptoSenderFactory
+from bot.utils.formatter import format_idr, format_crypto
+
+logger = logging.getLogger(__name__)
+
+
+def is_admin(user_id: int) -> bool:
+    """Mengecek apakah user_id terdaftar dalam ADMIN_CHAT_IDS."""
+    return user_id in settings.ADMIN_CHAT_IDS
+
+
+async def admin_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Tampilkan menu bantuan admin."""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Anda tidak memiliki akses ke menu administrator.")
+        return
+
+    admin_text = (
+        "👑 <b>ADMIN PANEL — P2P CRYPTO BOT</b>\n\n"
+        "Gunakan perintah-perintah di bawah ini untuk mengelola bot:\n\n"
+        "📊 <b>Statistik & Wallet:</b>\n"
+        "• /stats — Statistik harian & volume transaksi\n"
+        "• /refreshwallet — Sinkronisasi saldo on-chain sekarang\n\n"
+        "🛒 <b>Manajemen Order:</b>\n"
+        "• /orders — Daftar seluruh order pending/paid aktif\n"
+        "• /confirm <code>[ORDER_ID]</code> — Konfirmasi penyelesaian order manual\n\n"
+        "⚙️ <b>Sistem & Pengguna:</b>\n"
+        "• /setspread <code>[SYMBOL] [PERCENT]</code> — Set spread koin (e.g. <code>/setspread USDT 1.2</code>)\n"
+        "• /broadcast <code>[PESAN]</code> — Kirim siaran pesan ke semua pengguna\n"
+        "• /ban <code>[USER_ID]</code> — Blokir pengguna dari bot\n"
+        "• /unban <code>[USER_ID]</code> — Buka blokir pengguna\n"
+    )
+    await update.message.reply_text(admin_text, parse_mode="HTML")
+
+
+async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Menampilkan statistik harian transaksi bot."""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        return
+
+    db = SessionLocal()
+    try:
+        stats = crud.get_daily_stats(db)
+        total_users = crud.get_user_count(db)
+        
+        stats_text = (
+            "📊 <b>STATISTIK HARIAN BOT</b>\n"
+            f"📅 Tanggal: {datetime.now(timezone.utc).strftime('%d-%m-%Y')}\n\n"
+            f"👤 <b>Total Pengguna:</b> {total_users} member\n"
+            f"🛒 <b>Order Hari Ini:</b> {stats['total_orders_today']} order\n"
+            f"✅ <b>Order Sukses Hari Ini:</b> {stats['completed_orders_today']} order\n"
+            f"💳 <b>Volume Transaksi Hari Ini:</b> {format_idr(stats['total_volume_idr_today'])}\n"
+        )
+        await update.message.reply_text(stats_text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error stats_handler: {e}", exc_info=True)
+        await update.message.reply_text("❌ Gagal memuat statistik.")
+    finally:
+        db.close()
+
+
+async def setspread_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Mengupdate markup spread persentase untuk symbol tertentu."""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        return
+
+    # Validasi argument: /setspread USDT 1.2
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "⚠️ Format salah. Contoh penggunaan:\n"
+            "<code>/setspread USDT 1.5</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    symbol = context.args[0].upper()
+    try:
+        spread_pct = float(context.args[1])
+    except ValueError:
+        await update.message.reply_text("❌ Nilai persentase spread harus berupa angka desimal.")
+        return
+
+    db = SessionLocal()
+    try:
+        config = crud.update_price_config(db, symbol, spread_pct)
+        if config:
+            await update.message.reply_text(
+                f"✅ Spread harga untuk <b>{symbol}</b> berhasil diperbarui menjadi <b>{spread_pct}%</b>.",
+                parse_mode="HTML"
+            )
+        else:
+            await update.message.reply_text(f"❌ Koin/Token <b>{symbol}</b> tidak didukung atau tidak aktif.", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error setspread: {e}", exc_info=True)
+        await update.message.reply_text("❌ Gagal mengupdate spread harga.")
+    finally:
+        db.close()
+
+
+async def orders_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Menampilkan list order yang berstatus pending atau paid (butuh review admin)."""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        return
+
+    db = SessionLocal()
+    try:
+        # Ambil order yang statusnya pending, paid, payout_processing, atau manual_review
+        orders = (
+            db.query(Order)
+            .filter(Order.status.in_(["pending", "paid", "payout_processing", "manual_review"]))
+            .order_by(Order.created_at.desc())
+            .limit(20)
+            .all()
+        )
+        
+        if not orders:
+            await update.message.reply_text("📥 <b>Tidak ada order aktif/tertunda saat ini.</b>", parse_mode="HTML")
+            return
+
+        text_lines = ["📥 <b>DAFTAR ORDER AKTIF (PENDING/PAID)</b>\n"]
+        for o in orders:
+            o_type = "🛒 BELI" if o.order_type == "buy" else "💵 JUAL"
+            crypto_str = format_crypto(float(o.crypto_amount), o.crypto_symbol)
+            
+            text_lines.append(
+                f"• <b>{o.order_id}</b> ({o_type})\n"
+                f"  🚦 Status: <b>{o.status.upper()}</b>\n"
+                f"  🪙 Koin: <code>{crypto_str} ({o.network})</code>\n"
+                f"  💳 IDR: <code>{format_idr(o.total_idr)}</code>\n"
+                f"  👤 User ID: <code>{o.telegram_id}</code>\n"
+            )
+        
+        await update.message.reply_text("\n".join(text_lines), parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error orders_handler: {e}", exc_info=True)
+        await update.message.reply_text("❌ Gagal memuat daftar order.")
+    finally:
+        db.close()
+
+
+async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Mengonfirmasi penyelesaian order secara manual oleh admin.
+    Digunakan jika:
+      - Sell order: Admin sudah mengirim Rupiah ke rekening customer.
+      - Buy order: Crypto gagal terkirim otomatis lalu dikirim manual oleh admin.
+    """
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ Format salah. Sertakan ID Order. Contoh:\n"
+            "<code>/confirm ORD-20260527-XYZ</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    order_id = context.args[0].strip()
+    
+    db = SessionLocal()
+    try:
+        order = crud.get_order_by_id(db, order_id)
+        if not order:
+            await update.message.reply_text(f"❌ Order <code>{order_id}</code> tidak ditemukan.", parse_mode="HTML")
+            return
+
+        if order.status == "completed":
+            await update.message.reply_text(f"ℹ️ Order <code>{order_id}</code> sudah berstatus COMPLETED sebelumnya.", parse_mode="HTML")
+            return
+
+        # Update status order ke completed
+        crud.update_order_status(
+            db, 
+            order_id, 
+            new_status="completed", 
+            completed_at=datetime.utcnow()
+        )
+        crud.release_order_inventory(db, order_id)
+        
+        # Kirim notifikasi sukses ke user
+        user_msg = (
+            f"✅ <b>Transaksi Selesai!</b>\n\n"
+            f"Pesanan <code>{order.order_id}</code> telah selesai diproses oleh admin.\n"
+            f"• Aset: {format_crypto(float(order.crypto_amount), order.crypto_symbol)} ({order.network})\n"
+            f"• Nominal IDR: {format_idr(order.total_idr)}\n\n"
+            f"Dana Rupiah (untuk Penjualan) atau Koin Crypto (untuk Pembelian) Anda sudah berhasil dikirim. Terima kasih! 🙏"
+        )
+        try:
+            menu_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_back")]])
+            await context.bot.send_message(chat_id=order.telegram_id, text=user_msg, reply_markup=menu_keyboard, parse_mode="HTML")
+        except Exception as notify_err:
+            logger.warning(f"Gagal mengirim notifikasi ke user {order.telegram_id}: {notify_err}")
+
+        await update.message.reply_text(f"✅ Order <code>{order_id}</code> berhasil dikonfirmasi sebagai COMPLETED.", parse_mode="HTML")
+
+    except Exception as e:
+        logger.error(f"Error confirm_handler: {e}", exc_info=True)
+        await update.message.reply_text("❌ Gagal memproses konfirmasi order.")
+    finally:
+        db.close()
+
+
+async def broadcast_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Mengirim pesan broadcast/siaran ke seluruh user terdaftar di bot."""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        return
+
+    # Validasi argument: /broadcast Pengumuman penting
+    if not context.args:
+        await update.message.reply_text("⚠️ Format salah. Masukkan pesan siaran. Contoh:\n`/broadcast Halo member...`")
+        return
+
+    broadcast_msg = update.message.text.replace("/broadcast", "").strip()
+
+    db = SessionLocal()
+    try:
+        users = db.query(User).filter(User.is_banned == False).all() # noqa: E712
+        if not users:
+            await update.message.reply_text("ℹ️ Tidak ada pengguna terdaftar untuk dikirim broadcast.")
+            return
+
+        await update.message.reply_text(f"⏳ Mengirim siaran ke {len(users)} pengguna...")
+        
+        success_count = 0
+        fail_count = 0
+        
+        for u in users:
+            try:
+                await context.bot.send_message(
+                    chat_id=u.telegram_id,
+                    text=f"📢 <b>PENGUMUMAN DARI OWNER</b>\n\n{broadcast_msg}",
+                    parse_mode="HTML"
+                )
+                success_count += 1
+            except Exception:
+                fail_count += 1
+                
+        await update.message.reply_text(
+            f"📢 <b>Broadcast Selesai</b>\n"
+            f"• Sukses terkirim: <code>{success_count} user</code>\n"
+            f"• Gagal/Blokir bot: <code>{fail_count} user</code>",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error broadcast: {e}", exc_info=True)
+        await update.message.reply_text("❌ Terjadi kesalahan saat mengirim broadcast.")
+    finally:
+        db.close()
+
+
+async def ban_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Memblokir user agar tidak bisa bertransaksi."""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("⚠️ Contoh: `/ban 123456789`")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ User ID harus berupa angka.")
+        return
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_id == target_id).first()
+        if not user:
+            await update.message.reply_text("❌ Pengguna tidak ditemukan di database.")
+            return
+
+        user.is_banned = True
+        db.commit()
+        await update.message.reply_text(f"✅ Pengguna dengan ID <code>{target_id}</code> berhasil DI-BAN.", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error ban_handler: {e}", exc_info=True)
+        await update.message.reply_text("❌ Gagal memblokir pengguna.")
+    finally:
+        db.close()
+
+
+async def unban_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Membuka blokir user."""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        return
+
+    if not context.args:
+        await update.message.reply_text("⚠️ Contoh: `/unban 123456789`")
+        return
+
+    try:
+        target_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ User ID harus berupa angka.")
+        return
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.telegram_id == target_id).first()
+        if not user:
+            await update.message.reply_text("❌ Pengguna tidak ditemukan di database.")
+            return
+
+        user.is_banned = False
+        db.commit()
+        await update.message.reply_text(f"✅ Blokir pengguna dengan ID <code>{target_id}</code> berhasil DIBUKA.", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error unban_handler: {e}", exc_info=True)
+        await update.message.reply_text("❌ Gagal membuka blokir pengguna.")
+    finally:
+        db.close()
+
+
+async def refreshwallet_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Memicu sinkronisasi saldo blockchain secara manual."""
+    user_id = update.effective_user.id
+    if not is_admin(user_id):
+        return
+
+    await update.message.reply_text("⏳ <i>Melakukan sinkronisasi saldo on-chain wallet...</i>", parse_mode="HTML")
+    
+    from config.assets import STOCK_ASSETS
+
+    db = SessionLocal()
+    try:
+        success_list = []
+        fail_list = []
+        
+        for sym, net in STOCK_ASSETS:
+            try:
+                sender = CryptoSenderFactory.get_sender(net)
+                balance = await sender.get_balance(symbol=sym)
+                addr = getattr(sender, "wallet_address", None)
+                crud.update_wallet_balance(
+                    db, network=net, symbol=sym, balance=balance, address=addr
+                )
+                success_list.append(f"{sym} ({net})")
+            except Exception as net_exc:
+                logger.warning(f"Refresh wallet manual gagal untuk {sym} ({net}): {net_exc}")
+                fail_list.append(f"{sym} ({net})")
+                
+        status_msg = (
+            "✅ <b>SINKRONISASI WALLET SELESAI</b>\n\n"
+            f"• Sukses: <code>{', '.join(success_list)}</code>\n"
+            f"• Gagal: <code>{', '.join(fail_list) if fail_list else 'Tidak ada'}</code>"
+        )
+        await update.message.reply_text(status_msg, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Error refreshwallet: {e}", exc_info=True)
+        await update.message.reply_text("❌ Gagal menyinkronisasikan wallet.")
+    finally:
+        db.close()
+
+
+async def admin_approve_buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback tombol Admin: Approve order Buy & trigger auto-send crypto."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not is_admin(user_id):
+        await query.answer("❌ Akses ditolak.", show_alert=True)
+        return
+
+    order_id = query.data.replace("admin_approve_buy_", "")
+    db = SessionLocal()
+    try:
+        order = crud.get_order_by_id(db, order_id)
+        if not order:
+            await query.answer("❌ Order tidak ditemukan.", show_alert=True)
+            return
+
+        if order.payout_tx_hash or order.status == "completed":
+            await query.answer("ℹ️ Order ini sudah COMPLETED.", show_alert=True)
+            return
+
+        if order.status not in ("pending", "paid", "manual_review", "expired"):
+            await query.answer(
+                f"ℹ️ Order berstatus {order.status.upper()} — tidak bisa di-approve.", show_alert=True
+            )
+            return
+
+        await query.answer("⏳ Memproses pengiriman crypto otomatis...", show_alert=True)
+        import asyncio
+        from bot.handlers.buy import _run_finalize_background
+        asyncio.create_task(
+            _run_finalize_background(order.order_id, context.bot, allow_admin=True)
+        )
+
+        caption_now = query.message.caption or ""
+        await query.edit_message_caption(
+            caption=f"{caption_now}\n\n✅ <b>APPROVED & DIESEKUSI OTOMATIS OLEH ADMIN</b>",
+            parse_mode="HTML"
+        )
+    except Exception as e:
+        logger.error(f"Error admin_approve_buy_callback {order_id}: {e}", exc_info=True)
+        await query.answer("❌ Gagal memproses approval.", show_alert=True)
+    finally:
+        db.close()
+
+
+async def admin_reject_buy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback tombol Admin: Reject order Buy."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not is_admin(user_id):
+        await query.answer("❌ Akses ditolak.", show_alert=True)
+        return
+
+    order_id = query.data.replace("admin_reject_buy_", "")
+    db = SessionLocal()
+    try:
+        order = crud.get_order_by_id(db, order_id)
+        if order:
+            crud.update_order_status(db, order_id, new_status="rejected", failure_reason="Ditolak oleh admin")
+            crud.release_order_inventory(db, order_id)
+            from bot.utils.telegram_utils import safe_send_message
+            await safe_send_message(
+                context.bot, order.telegram_id,
+                f"❌ <b>Order {order_id} Ditolak</b>\n"
+                f"Bukti pembayaran Anda tidak dapat diverifikasi oleh admin. Silakan hubungi admin jika ada kendala."
+            )
+        await query.answer("Order berhasil ditolak.")
+        caption_now = query.message.caption or ""
+        await query.edit_message_caption(
+            caption=f"{caption_now}\n\n❌ <b>DITOLAK OLEH ADMIN</b>",
+            parse_mode="HTML"
+        )
+    finally:
+        db.close()
+
+
+async def admin_approve_topup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback tombol Admin: Approve topup saldo IDR."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not is_admin(user_id):
+        await query.answer("❌ Akses ditolak.", show_alert=True)
+        return
+
+    topup_id = query.data.replace("admin_approve_topup_", "")
+    db = SessionLocal()
+    try:
+        topup = crud.get_topup_order_by_id(db, topup_id)
+        if not topup:
+            await query.answer("❌ Topup tidak ditemukan.", show_alert=True)
+            return
+
+        if topup.status == "SUCCESS":
+            await query.answer("ℹ️ Topup ini sudah LUNAS.", show_alert=True)
+            return
+
+        if not crud.claim_topup_success(db, topup_id):
+            await query.answer("ℹ️ Topup ini sudah diproses sistem.", show_alert=True)
+            return
+
+        new_bal = crud.credit_user_balance(db, topup.telegram_id, topup.amount_idr)
+
+        from bot.utils.telegram_utils import safe_send_message
+        menu_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_back")]])
+        await safe_send_message(
+            context.bot, topup.telegram_id,
+            f"✅ <b>PEMBAYARAN TOPUP TERVERIFIKASI ADMIN!</b>\n\n"
+            f"🎉 Topup saldo sebesar <b>{format_idr(topup.amount_idr)}</b> telah berhasil di-approve!\n"
+            f"💳 <b>Total Saldo Bot Anda Saat Ini</b>: <b>{format_idr(int(new_bal))}</b>",
+            reply_markup=menu_keyboard
+        )
+
+        await query.answer("Topup berhasil di-approve!")
+        caption_now = query.message.caption or ""
+        await query.edit_message_caption(
+            caption=f"{caption_now}\n\n✅ <b>APPROVED & SALDO DITAMBAHKAN OLEH ADMIN</b>",
+            parse_mode="HTML"
+        )
+    finally:
+        db.close()
+
+
+async def admin_reject_topup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback tombol Admin: Reject topup saldo IDR."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not is_admin(user_id):
+        await query.answer("❌ Akses ditolak.", show_alert=True)
+        return
+
+    topup_id = query.data.replace("admin_reject_topup_", "")
+    db = SessionLocal()
+    try:
+        crud.update_topup_status(db, topup_id, "CANCELLED")
+        topup = crud.get_topup_order_by_id(db, topup_id)
+        if topup:
+            from bot.utils.telegram_utils import safe_send_message
+            await safe_send_message(
+                context.bot, topup.telegram_id,
+                f"❌ <b>Top-up {topup_id} Ditolak</b>\n"
+                f"Bukti pembayaran Anda tidak dapat diverifikasi oleh admin."
+            )
+        await query.answer("Topup berhasil ditolak.")
+        caption_now = query.message.caption or ""
+        await query.edit_message_caption(
+            caption=f"{caption_now}\n\n❌ <b>DITOLAK OLEH ADMIN</b>",
+            parse_mode="HTML"
+        )
+    finally:
+        db.close()

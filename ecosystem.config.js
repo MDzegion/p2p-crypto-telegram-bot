@@ -1,0 +1,30 @@
+module.exports = {
+  apps: [
+    {
+      name: 'gopay-gateway',
+      cwd: './gopay-gateway',
+      script: 'server.js',
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '300M',
+      env: {
+        NODE_ENV: 'production',
+        PORT: 3000
+      }
+    },
+    {
+      name: 'p2p-telegram-bot',
+      cwd: './',
+      script: 'main.py',
+      interpreter: 'python',
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '500M',
+      env: {
+        PYTHONUNBUFFERED: '1'
+      }
+    }
+  ]
+};

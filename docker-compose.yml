@@ -1,0 +1,15 @@
+# ============================
+# Docker Compose — P2P Crypto Bot
+# ============================
+# Services:
+#   bot — Telegram bot long-polling (main.py)
+#
+# Usage:
+#   docker compose up -d --build
+
+services:
+  # ---------- Bot ----------
+  bot:
+    build: .
+    env_file: .env
+    restart: always

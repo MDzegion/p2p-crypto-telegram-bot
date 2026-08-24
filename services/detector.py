@@ -1,0 +1,339 @@
+"""
+services/detector.py — Deteksi Deposit Crypto Otomatis (Full Auto, Tanpa Admin).
+=================================================================================
+Memantau transaksi masuk ke hot wallet untuk order dengan status
+`WAITING_CRYPTO_DEPOSIT` (Sell maupun Convert/Swap).
+
+Alur (bypass verifikasi admin -> full otomatis):
+1. Verifikasi TX hash di blockchain (on-chain) via services.tx_verifier.
+2. Jika tidak ada hash, auto-scan riwayat transaksi masuk wallet.
+3. Terverifikasi -> status `CRYPTO_CONFIRMED` + notif user.
+4. Order Swap/Convert -> eksekusi payout otomatis koin tujuan ke wallet buyer
+   -> sukses: `COMPLETED` + notif (TX hash + explorer).
+   -> gagal: `PAYOUT_QUEUED` + notif admin (kirim manual).
+5. Order Sell -> notif admin untuk transfer Rupiah (bank tetap manual).
+"""
+
+import asyncio
+import logging
+from datetime import datetime
+from decimal import Decimal
+from weakref import WeakValueDictionary
+
+from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+from database.connection import SessionLocal
+from database.models import Order, AuditLog
+from services import tx_verifier
+from bot.keyboards.main_menu import get_owner_button
+from bot.utils.formatter import format_crypto, format_idr
+from bot.utils.telegram_utils import safe_send_message, notify_admins
+
+logger = logging.getLogger(__name__)
+
+_payout_locks = WeakValueDictionary()
+
+
+class DepositDetector:
+    def __init__(self):
+        self.is_running = False
+
+    # ---------------- Main ----------------
+    async def scan_incoming_deposits(self, bot_app=None):
+        """
+        Memindai deposit masuk untuk order berstatus WAITING_CRYPTO_DEPOSIT.
+        """
+        db = SessionLocal()
+        try:
+            pending_orders = db.query(Order).filter(
+                Order.status.in_(["WAITING_CRYPTO_DEPOSIT", "PAYOUT_QUEUED"])
+            ).all()
+
+            if not pending_orders:
+                return
+
+            # Proses paralel (max 5) — verifikasi on-chain lambat, jangan antri.
+            sem = asyncio.Semaphore(5)
+
+            async def _proc(order):
+                async with sem:
+                    try:
+                        await self._process_order(db, order, bot_app)
+                    except Exception as order_exc:
+                        logger.error(
+                            "Error memproses deposit order %s: %s",
+                            order.order_id, order_exc,
+                            exc_info=True,
+                        )
+
+            await asyncio.gather(*(_proc(o) for o in pending_orders))
+        except Exception as exc:
+            logger.error("Error running DepositDetector: %s", exc, exc_info=True)
+        finally:
+            db.close()
+
+    # ---------------- Per order ----------------
+    async def _process_order(self, db, order, bot_app):
+        expected_wallet = order.deposit_wallet or ""
+        expected_amount = float(order.crypto_amount or 0)
+
+        # Order yang payout-nya pernah gagal/crash (PAYOUT_QUEUED tanpa hash) -> retry langsung.
+        if order.status == "PAYOUT_QUEUED":
+            await self._execute_payout(db, order, bot_app)
+            return
+
+        tx_hash = (order.deposit_tx_hash or order.tx_hash or "").strip()
+        if tx_hash.startswith("PHOTO:"):
+            tx_hash = ""  # bukti foto -> andalkan auto-scan riwayat
+
+        # 1. Verifikasi TX hash on-chain (jika ada)
+        verified = None
+        if tx_hash:
+            verified = await tx_verifier.verify_deposit(
+                network=order.network,
+                symbol=order.crypto_symbol,
+                tx_hash=tx_hash,
+                expected_wallet=expected_wallet,
+                expected_amount=expected_amount,
+            )
+
+        # 2. Auto-scan riwayat transaksi masuk wallet (jika belum terverifikasi)
+        if not verified or not verified.get("verified"):
+            if expected_wallet:
+                incoming = await tx_verifier.get_recent_incoming(
+                    network=order.network,
+                    symbol=order.crypto_symbol,
+                    wallet=expected_wallet,
+                    min_amount=expected_amount,
+                    limit=20,
+                )
+                for txn in incoming:
+                    if not txn.get("tx_hash"):
+                        continue
+                    # Hindari double-claim hash dengan order lain
+                    if self._is_hash_used(db, txn["tx_hash"], exclude_order=order.order_id):
+                        continue
+                    ver = await tx_verifier.verify_deposit(
+                        network=order.network,
+                        symbol=order.crypto_symbol,
+                        tx_hash=txn["tx_hash"],
+                        expected_wallet=expected_wallet,
+                        expected_amount=expected_amount,
+                    )
+                    if ver.get("verified"):
+                        tx_hash = txn["tx_hash"]
+                        verified = ver
+                        break
+
+        if not verified or not verified.get("verified"):
+            logger.info(
+                "Order %s: deposit belum terverifikasi (hash=%s)",
+                order.order_id, tx_hash or "-",
+            )
+            return
+
+        # Guard anti reuse hash: hash yang sudah diklaim order lain tidak boleh
+        # mengonfirmasi order ini (jalur verifikasi hash langsung maupun auto-scan).
+        if tx_hash and self._is_hash_used(db, tx_hash, exclude_order=order.order_id):
+            logger.warning(
+                "Order %s: TX hash %s sudah dipakai order lain — tidak diklaim",
+                order.order_id, tx_hash,
+            )
+            return
+
+        # 3. Konfirmasi deposit
+        await self._confirm_order(db, order, tx_hash, verified, bot_app)
+
+    # ---------------- Confirm & Payout ----------------
+    async def _confirm_order(self, db, order, tx_hash, verified, bot_app):
+        if order.status != "WAITING_CRYPTO_DEPOSIT":
+            return
+
+        old_status = order.status
+        order.status = "CRYPTO_CONFIRMED"
+        order.confirmed_at = datetime.utcnow()
+        if tx_hash:
+            order.deposit_tx_hash = tx_hash
+        db.add(AuditLog(
+            telegram_id=order.telegram_id,
+            action="DEPOSIT_CONFIRMED_ONCHAIN",
+            order_id=order.order_id,
+            from_status=old_status,
+            to_status="CRYPTO_CONFIRMED",
+            details=f"Deposit {verified.get('amount')} {order.crypto_symbol} ({order.network}) "
+                    f"terverifikasi otomatis. Hash: {tx_hash}",
+        ))
+        db.commit()
+
+        # Notif user: transaksi masuk terverifikasi
+        if bot_app:
+            try:
+                user_msg = (
+                    f"✅ <b>Transaksi Masuk Terverifikasi Otomatis!</b>\n\n"
+                    f"ID Order: <code>{order.order_id}</code>\n"
+                    f"Deposit: {format_crypto(verified.get('amount'), order.crypto_symbol)} ({order.network})\n"
+                    f"TX Hash: <code>{tx_hash}</code>\n\n"
+                )
+                if order.order_type == "swap":
+                    user_msg += (
+                        f"🔄 Sedang mengirim <b>{order.target_crypto_symbol} "
+                        f"({order.target_network})</b> ke walletmu..."
+                    )
+                else:
+                    user_msg += (
+                        "💰 Admin akan segera memproses pembayaran Rupiah "
+                        "ke rekeningmu."
+                    )
+                keyboard = InlineKeyboardMarkup([[get_owner_button()]])
+                await safe_send_message(bot_app, order.telegram_id, user_msg, reply_markup=keyboard)
+            except Exception as exc:
+                logger.warning("Gagal notif user %s: %s", order.telegram_id, exc)
+
+        if order.order_type == "swap":
+            await self._execute_payout(db, order, bot_app)
+        else:
+            # Sell: notif admin untuk transfer Rupiah
+            if bot_app:
+                try:
+                    admin_msg = (
+                        f"💰 <b>DEPOSIT CRYPTO TERVERIFIKASI (SELL)</b>\n\n"
+                        f"Order: <code>{order.order_id}</code>\n"
+                        f"User ID: <code>{order.telegram_id}</code>\n"
+                        f"Deposit: {format_crypto(verified.get('amount'), order.crypto_symbol)} ({order.network})\n"
+                        f"TX Hash: <code>{tx_hash}</code>\n\n"
+                        f"‼️ <b>TRANSFER RUPIAH SEGERA:</b> "
+                        f"<b>{format_idr(order.total_idr)}</b> ke rekening:\n"
+                        f"<code>{order.buyer_wallet}</code>\n\n"
+                        f"Setelah transfer, gunakan <code>/confirm {order.order_id}</code>."
+                    )
+                    await notify_admins(bot_app, admin_msg)
+                except Exception as exc:
+                    logger.warning("Gagal notif admin sell: %s", exc)
+
+    async def _execute_payout(self, db, order, bot_app):
+        """Eksekusi pengiriman koin tujuan (swap) ke wallet buyer."""
+        from services.payout_service import send_order_payout
+        from database.crud import reserve_order_inventory, release_order_inventory
+
+        # Guard anti double-payout: hash sudah ada berarti payout pernah sukses.
+        if order.payout_tx_hash:
+            return
+
+        lock = _payout_locks.setdefault(order.order_id, asyncio.Lock())
+        async with lock:
+            db.refresh(order)
+            if order.payout_tx_hash or order.status == "COMPLETED":
+                return
+
+            if order.status == "PAYOUT_QUEUED":
+                # Masih in-flight dari worker lain jika updated_at segar (<120s).
+                # Stale (>120s, crash) -> boleh di-retry.
+                if order.updated_at and (datetime.utcnow() - order.updated_at).total_seconds() < 120:
+                    return
+            elif order.status != "CRYPTO_CONFIRMED":
+                return
+
+            old_status = order.status
+            order.status = "PAYOUT_QUEUED"
+            db.add(AuditLog(
+                telegram_id=order.telegram_id,
+                action="PAYOUT_QUEUED",
+                order_id=order.order_id,
+                from_status=old_status,
+                to_status="PAYOUT_QUEUED",
+                details=f"Auto-payout {order.target_crypto_amount} {order.target_crypto_symbol} "
+                        f"({order.target_network}) ke {order.buyer_wallet}",
+            ))
+            db.commit()
+
+            if not reserve_order_inventory(
+                db,
+                order.order_id,
+                order.target_network,
+                order.target_crypto_symbol,
+                Decimal(str(order.target_crypto_amount)),
+            ):
+                result = {
+                    "success": False,
+                    "tx_hash": "",
+                    "explorer_url": "",
+                    "error_message": (
+                        f"Stok {order.target_crypto_symbol} ({order.target_network}) tidak mencukupi. "
+                        "Silakan proses manual melalui admin."
+                    ),
+                }
+            else:
+                result = await send_order_payout(order)
+
+            if result.get("success"):
+                order.status = "COMPLETED"
+                order.payout_tx_hash = result.get("tx_hash")
+                order.completed_at = datetime.utcnow()
+                db.add(AuditLog(
+                    telegram_id=order.telegram_id,
+                    action="SWAP_COMPLETED",
+                    order_id=order.order_id,
+                    from_status="PAYOUT_QUEUED",
+                    to_status="COMPLETED",
+                    details=f"Payout sukses. Hash: {result.get('tx_hash')}",
+                ))
+                db.commit()
+                release_order_inventory(db, order.order_id)
+
+                if bot_app:
+                    try:
+                        user_msg = (
+                            f"🎉 <b>CONVERT BERHASIL!</b>\n\n"
+                            f"ID Order: <code>{order.order_id}</code>\n"
+                            f"Terima: {format_crypto(float(order.target_crypto_amount), order.target_crypto_symbol)} "
+                            f"({order.target_network})\n"
+                            f"TX Hash: <code>{result.get('tx_hash')}</code>\n"
+                        )
+                        if result.get("explorer_url"):
+                            user_msg += f"\n🔗 <a href=\"{result['explorer_url']}\">Lihat di Explorer</a>"
+                        user_msg += "\n\nTerima kasih sudah menggunakan layanan kami! 🙏"
+                        menu_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_back")]])
+                        await safe_send_message(bot_app, order.telegram_id, user_msg, reply_markup=menu_keyboard)
+                    except Exception as exc:
+                        logger.warning("Gagal notif payout sukses: %s", exc)
+            else:
+                order.status = "manual_review"
+                order.failure_reason = result.get("error_message") or "Auto-payout gagal"
+                db.commit()
+                if bot_app:
+                    try:
+                        admin_msg = (
+                            f"🚨 <b>AUTO-PAYOUT GAGAL (CONVERT)</b>\n\n"
+                            f"Order: <code>{order.order_id}</code>\n"
+                            f"Kirim: {order.target_crypto_amount} {order.target_crypto_symbol} "
+                            f"({order.target_network})\n"
+                            f"Wallet: <code>{order.buyer_wallet}</code>\n"
+                            f"Error: {order.failure_reason}\n\n"
+                            f"Payout gagal otomatis — kirim secara manual, lalu "
+                            f"<code>/confirm {order.order_id}</code>."
+                        )
+                        await notify_admins(bot_app, admin_msg)
+                        await safe_send_message(
+                            bot_app,
+                            order.telegram_id,
+                            f"⏳ <b>Convert memerlukan bantuan admin</b>\n\n"
+                            f"Order: <code>{order.order_id}</code>\n"
+                            "Pembayaran/deposit sudah diterima, tetapi pengiriman koin tujuan "
+                            "belum dapat dilakukan otomatis. Silakan hubungi admin. 🙏",
+                        )
+                    except Exception as exc:
+                        logger.warning("Gagal notif admin payout gagal: %s", exc)
+
+    # ---------------- Helpers ----------------
+    @staticmethod
+    def _is_hash_used(db, tx_hash, exclude_order):
+        if not tx_hash:
+            return True
+        existing = (
+            db.query(Order)
+            .filter(Order.deposit_tx_hash == tx_hash)
+            .filter(Order.order_id != exclude_order)
+            .first()
+        )
+        return existing is not None
+
+deposit_detector = DepositDetector()
