@@ -1,5 +1,5 @@
 """
-app.py — Hugging Face Space Entrypoint & 24/7 Dual Service Runner
+app.py — Streamlit UI & 24/7 Dual Service Runner for Hugging Face Spaces
 Menjalankan GoPay Gateway (Node.js) dan Telegram Bot (Python) di background 24/7.
 """
 
@@ -8,7 +8,7 @@ import sys
 import subprocess
 import threading
 import time
-import gradio as gr
+import streamlit as st
 
 def ensure_node():
     """Download pre-built Node.js 20 Linux x64 standalone binary jika belum ada."""
@@ -29,8 +29,8 @@ def ensure_node():
     return node_bin, npm_bin
 
 def init_and_run_services():
-    """Jalankan servis di background setelah web UI siap."""
-    time.sleep(3)
+    """Jalankan servis di background setelah server start."""
+    time.sleep(2)
     print("🚀 [STARTUP] Memulai inisialisasi background services...")
 
     gateway_dir = os.path.join(os.path.dirname(__file__), "gopay-gateway")
@@ -81,24 +81,22 @@ def init_and_run_services():
         print(f"⚠️ [BOT ERROR] Gagal start main.py: {e}")
 
 
-# Jalankan worker background di daemon thread
-threading.Thread(target=init_and_run_services, daemon=True).start()
+# Jalankan worker background hanya 1 instance per container process
+if "daemon_started" not in globals():
+    globals()["daemon_started"] = True
+    threading.Thread(target=init_and_run_services, daemon=True).start()
 
-def get_status():
-    return "🟢 Status: ACTIVE 24/7\n• Telegram Bot: Polling Active\n• GoPay Gateway: Active (Port 3005)\n• On-chain Monitor: Running (20s interval)"
+st.set_page_config(page_title="P2P Crypto Telegram Bot", page_icon="🤖")
+st.title("🤖 P2P Crypto Telegram Bot — Live Server")
+st.success("🟢 Sistem Bot Telegram dan GoPay Gateway aktif 24 jam di cloud.")
 
-with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
-    gr.Markdown("# 🤖 P2P Crypto Telegram Bot — Live Server")
-    gr.Markdown("Servis Bot Telegram dan GoPay Gateway berjalan aktif 24 jam nonstop di cloud.")
-    
-    status_output = gr.Textbox(
-        label="Service Status",
-        value=get_status(),
-        interactive=False,
-        lines=4
-    )
-    refresh_btn = gr.Button("🔄 Refresh Status")
-    refresh_btn.click(fn=get_status, outputs=status_output)
+col1, col2 = st.columns(2)
+with col1:
+    st.info("🤖 **Telegram Bot:** Active (Polling)")
+    st.info("💳 **GoPay Gateway:** Active (Port 3005)")
+with col2:
+    st.info("⛓️ **Multi-Chain Scanner:** Active (20s)")
+    st.info("📈 **Binance Vision Price:** Connected")
 
-if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+if st.button("🔄 Refresh"):
+    st.rerun()
