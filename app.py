@@ -6,15 +6,15 @@ Menjalankan GoPay Gateway (Node.js) dan Telegram Bot (Python) di background 24/7
 import os
 import sys
 import subprocess
-import time
 import threading
 import gradio as gr
 
-def prepare_gopay_gateway():
+def start_all_background_services():
+    """Worker background untuk inisialisasi dan menjalankan servis."""
     gateway_dir = os.path.join(os.path.dirname(__file__), "gopay-gateway")
     node_modules = os.path.join(gateway_dir, "node_modules")
-    
-    # 1. Setup .env jika belum ada
+
+    # 1. Setup gopay-gateway/.env jika belum ada
     gateway_env = os.path.join(gateway_dir, ".env")
     if not os.path.exists(gateway_env):
         qris_static = os.environ.get("QRIS_STATIC", "00020101021126680016ID.CO.GOPAY.WWW01189360001438922870000215ID10265038922870303UKE51440014ID.CO.QRIS.WWW0215ID10265038922870303UKE5204729953033605802ID5936TOKO DIGITAL HSN, DIGITAL & KREATIF6011DKI JAKARTA61051212162070703A01630453D8")
@@ -38,34 +38,29 @@ def prepare_gopay_gateway():
         except Exception as e:
             print(f"⚠️ [NPM WARNING] Gagal npm install: {e}")
 
-    # 4. Jalankan Node.js server
+    # 4. Jalankan GoPay Gateway (Node.js) di port 3005
     print("🟢 [GATEWAY] Menjalankan GoPay Partner Gateway...")
     try:
-        subprocess.run(["node", "server.js"], cwd=gateway_dir)
+        subprocess.Popen(["node", "server.js"], cwd=gateway_dir)
     except Exception as e:
         print(f"⚠️ [GATEWAY ERROR] {e}")
 
-def run_telegram_bot():
+    # 5. Jalankan Telegram Bot (Python)
     print("🤖 [BOT] Menjalankan Telegram Bot main.py...")
     try:
-        subprocess.run([sys.executable, "main.py"])
+        subprocess.Popen([sys.executable, "main.py"])
     except Exception as e:
         print(f"⚠️ [BOT ERROR] {e}")
 
-# Jalankan kedua background worker di daemon thread terpisah
-t_gw = threading.Thread(target=prepare_gopay_gateway, daemon=True)
-t_gw.start()
 
-time.sleep(3)
-
-t_bot = threading.Thread(target=run_telegram_bot, daemon=True)
-t_bot.start()
+# Langsung spawn worker background di daemon thread terpisah
+bg_thread = threading.Thread(target=start_all_background_services, daemon=True)
+bg_thread.start()
 
 def check_system_status():
-    """Fungsi status untuk tampilan web monitor di Hugging Face."""
     return "🟢 Status: ACTIVE 24/7\n• Telegram Bot: Polling Updates\n• GoPay Gateway: Active (Port 3005)\n• On-chain Monitor: Running (Interval 20s)"
 
-# Gradio Web UI
+# Gradio Web UI — Siap dalam 0.1 detik untuk healthcheck Hugging Face
 with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
     gr.Markdown("# 🤖 P2P Crypto Telegram Bot — Live Server")
     gr.Markdown("Servis Bot Telegram dan GoPay Gateway berjalan aktif 24 jam nonstop di cloud.")
