@@ -6,6 +6,7 @@ load_dotenv()
 
 class Settings:
     # Telegram settings
+    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
     _admin_env = os.getenv("ADMIN_CHAT_IDS") or os.getenv("ADMIN_CHAT_ID") or ""
     ADMIN_CHAT_IDS = [int(x.strip()) for x in _admin_env.split(",") if x.strip()]
     OWNER_USERNAME = os.getenv("OWNER_USERNAME", "TimRobbyPR")
