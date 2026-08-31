@@ -101,4 +101,4 @@ with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
     refresh_btn.click(fn=get_status, outputs=status_output)
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch()
