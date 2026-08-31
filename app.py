@@ -1,5 +1,5 @@
 """
-app.py — Minimal Gradio + Telegram Bot Runner
+app.py — Minimal Gradio + Telegram Bot Runner for Hugging Face Spaces
 """
 import os
 import sys
@@ -18,9 +18,7 @@ threading.Thread(target=start_bot, daemon=True).start()
 def get_status():
     return "🟢 Bot Telegram P2P Crypto Aktif 24/7"
 
-with gr.Blocks() as demo:
+demo = gr.Blocks()
+with demo:
     gr.Markdown("# 🤖 P2P Crypto Telegram Bot")
     status = gr.Textbox(value=get_status, label="Status")
-
-if __name__ == "__main__":
-    demo.launch()
