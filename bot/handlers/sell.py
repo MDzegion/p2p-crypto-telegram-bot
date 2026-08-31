@@ -50,14 +50,27 @@ INPUT_TX_HASH = 7
 
 # Helper untuk mendapatkan alamat hot wallet bot berdasarkan network
 def get_hot_wallet_address(network: str) -> str:
+    try:
+        from services.crypto_sender import CryptoSenderFactory
+        sender = CryptoSenderFactory.get_sender(network)
+        addr = getattr(sender, "wallet_address", "")
+        if addr:
+            return addr
+    except Exception as e:
+        logger.warning(f"Gagal mengambil wallet address untuk {network}: {e}")
+        
     net = network.upper()
-    if net in ["BSC", "ETH", "AVAX", "POLYGON", "BASE", "ARB", "GRAVITY"]:
+    if net in ["BSC", "ETH", "AVAX", "POLYGON", "BASE", "ARB", "GRAVITY", "OPTIMISM", "ROBINHOOD", "KAIA", "BERA", "HYPEREVM"]:
         return settings.EVM_WALLET_ADDRESS or "0x0000000000000000000000000000000000000000"
     elif net == "SOLANA":
         return settings.SOL_WALLET_ADDRESS or "SolanaWalletAddressPlaceholder"
     elif net == "TRON":
         return settings.TRX_WALLET_ADDRESS or "TronWalletAddressPlaceholder"
-    return "WalletAddressPlaceholder"
+    elif net == "TON":
+        return settings.TON_WALLET_ADDRESS or "TonWalletAddressPlaceholder"
+    elif net == "SUI":
+        return settings.SUI_WALLET_ADDRESS or "SuiWalletAddressPlaceholder"
+    return settings.EVM_WALLET_ADDRESS or "WalletAddressPlaceholder"
 
 
 async def start_sell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:

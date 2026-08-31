@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class GopayGatewayService:
     def __init__(self):
-        self.base_url = (settings.GOPAY_GATEWAY_URL or "http://127.0.0.1:3000").rstrip("/")
+        self.base_url = (settings.GOPAY_GATEWAY_URL or "http://127.0.0.1:3005").rstrip("/")
         self.api_key = settings.GOPAY_API_KEY or "RAHASIA"
 
     async def check_payment(self, amount: int, trx_id: str) -> Optional[Dict[str, Any]]:
