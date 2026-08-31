@@ -6,6 +6,14 @@ const path = require('path');
 require('dotenv').config();
 const sessionManager = require('./sessionManager');
 
+process.on('uncaughtException', (err) => {
+    console.error(`[UNCAUGHT_EXCEPTION] ${err.stack || err.message}`);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error(`[UNHANDLED_REJECTION] Reason:`, reason);
+});
+
 const PORT = process.env.PORT || 3000;
 const MAX_LOGS = 100;
 const CLAIMED_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 jam
@@ -723,6 +731,13 @@ app.get('/api/logs', apiKeyAuth, (req, res) => {
     res.json({ success: true, logs: activityLogs });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     logActivity('SYSTEM', `GoPay Partner Gateway berjalan pada port ${PORT}`);
 });
+
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
+
+setInterval(() => {
+    logActivity('INFO', `Heartbeat: Gateway active on port ${PORT} | Active QRIS: ${qrisStore.size} | Claimed: ${claimedTransactions.size}`);
+}, 60 * 1000);

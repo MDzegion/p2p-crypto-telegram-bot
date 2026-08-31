@@ -15,7 +15,7 @@ class Settings:
     PORT = int(os.getenv("PORT", 8000))
 
     # GoPay / Gopiz API Gateway
-    GOPAY_GATEWAY_URL = os.getenv("GOPAY_GATEWAY_URL", "http://127.0.0.1:3000")
+    GOPAY_GATEWAY_URL = os.getenv("GOPAY_GATEWAY_URL", "http://127.0.0.1:3005")
     GOPAY_API_KEY = os.getenv("GOPAY_API_KEY", "RAHASIA")
 
     # Wallets & RPC Endpoints

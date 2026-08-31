@@ -1,21 +1,35 @@
-# ============================
-# P2P Crypto Trading Bot
-# ============================
-# Runs the Telegram bot (long-polling) via main.py.
-
+# ===================================================
+# P2P Crypto Telegram Bot & GoPay Gateway (All-in-One)
+# ===================================================
 FROM python:3.11-slim
 
-# Prevent Python from buffering stdout/stderr (useful for Docker logs)
 ENV PYTHONUNBUFFERED=1
+ENV NODE_ENV=production
+
+# 1. Install Node.js 20 & PM2
+RUN apt-get update && apt-get install -y \
+    curl \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g pm2 \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Python dependencies first (leverages Docker layer caching)
+# 2. Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all source code
+# 3. Install Node.js dependencies
+COPY gopay-gateway/package*.json ./gopay-gateway/
+RUN cd gopay-gateway && npm install --production
+
+# 4. Copy codebase
 COPY . .
 
-# Entry point — runs bot polling
-CMD ["python", "main.py"]
+# Expose GoPay Gateway Port
+EXPOSE 3005
+
+# 5. Start dual services via PM2 Runtime
+CMD ["pm2-runtime", "start", "ecosystem.config.js"]

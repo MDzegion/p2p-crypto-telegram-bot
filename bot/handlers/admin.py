@@ -200,24 +200,100 @@ async def confirm_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         crud.release_order_inventory(db, order_id)
         
         # Kirim notifikasi sukses ke user
-        user_msg = (
-            f"✅ <b>Transaksi Selesai!</b>\n\n"
-            f"Pesanan <code>{order.order_id}</code> telah selesai diproses oleh admin.\n"
-            f"• Aset: {format_crypto(float(order.crypto_amount), order.crypto_symbol)} ({order.network})\n"
-            f"• Nominal IDR: {format_idr(order.total_idr)}\n\n"
-            f"Dana Rupiah (untuk Penjualan) atau Koin Crypto (untuk Pembelian) Anda sudah berhasil dikirim. Terima kasih! 🙏"
-        )
-        try:
-            menu_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_back")]])
-            await context.bot.send_message(chat_id=order.telegram_id, text=user_msg, reply_markup=menu_keyboard, parse_mode="HTML")
-        except Exception as notify_err:
-            logger.warning(f"Gagal mengirim notifikasi ke user {order.telegram_id}: {notify_err}")
+        from bot.utils.telegram_utils import safe_send_message
+        if order.order_type == "sell":
+            user_msg = (
+                f"💸 <b>PEMBAYARAN RUPIAH TELAH DITRANSFER!</b>\n\n"
+                f"ID Order: <code>{order.order_id}</code>\n"
+                f"🪙 Koin Dijual: <b>{format_crypto(float(order.crypto_amount), order.crypto_symbol)}</b> ({order.network})\n"
+                f"💰 Total Rupiah: <b>{format_idr(order.total_idr)}</b>\n"
+                f"🏦 Rekening Tujuan: <code>{order.buyer_wallet}</code>\n"
+                f"Status: <b>SELESAI / COMPLETED</b> ✅\n\n"
+                f"Dana Rupiah telah berhasil ditransfer oleh seller/admin ke rekening / e-Wallet Anda.\n"
+                f"Silakan periksa mutasi saldo rekening Anda. Terima kasih sudah bertransaksi! 🙏"
+            )
+        else:
+            user_msg = (
+                f"✅ <b>Pesanan Selesai!</b>\n\n"
+                f"Pesanan <code>{order.order_id}</code> telah selesai diproses oleh admin.\n"
+                f"• Koin: <b>{format_crypto(float(order.crypto_amount), order.crypto_symbol)}</b> ({order.network})\n"
+                f"• Nominal: <b>{format_idr(order.total_idr)}</b>\n"
+                f"Status: <b>SELESAI / COMPLETED</b> ✅\n\n"
+                f"Transaksi Anda sudah berhasil diselesaikan. Terima kasih! 🙏"
+            )
+        menu_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_back")]])
+        await safe_send_message(context.bot, order.telegram_id, user_msg, reply_markup=menu_keyboard)
 
         await update.message.reply_text(f"✅ Order <code>{order_id}</code> berhasil dikonfirmasi sebagai COMPLETED.", parse_mode="HTML")
 
     except Exception as e:
         logger.error(f"Error confirm_handler: {e}", exc_info=True)
         await update.message.reply_text("❌ Gagal memproses konfirmasi order.")
+    finally:
+        db.close()
+
+
+async def admin_confirm_sell_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback tombol Admin: Konfirmasi transfer Rupiah untuk order Sell."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not is_admin(user_id):
+        await query.answer("❌ Akses ditolak.", show_alert=True)
+        return
+
+    order_id = query.data.replace("admin_confirm_sell_", "")
+    db = SessionLocal()
+    try:
+        order = crud.get_order_by_id(db, order_id)
+        if not order:
+            await query.answer("❌ Order tidak ditemukan.", show_alert=True)
+            return
+
+        if order.status == "completed":
+            await query.answer("ℹ️ Order ini sudah COMPLETED.", show_alert=True)
+            return
+
+        # Update status order ke completed
+        crud.update_order_status(
+            db, 
+            order_id, 
+            new_status="completed", 
+            completed_at=datetime.utcnow()
+        )
+        crud.release_order_inventory(db, order_id)
+
+        # Kirim notifikasi sukses ke user
+        user_msg = (
+            f"💸 <b>PEMBAYARAN RUPIAH TELAH DITRANSFER!</b>\n\n"
+            f"ID Order: <code>{order.order_id}</code>\n"
+            f"🪙 Koin Dijual: <b>{format_crypto(float(order.crypto_amount), order.crypto_symbol)}</b> ({order.network})\n"
+            f"💰 Total Rupiah: <b>{format_idr(order.total_idr)}</b>\n"
+            f"🏦 Rekening Tujuan: <code>{order.buyer_wallet}</code>\n"
+            f"Status: <b>SELESAI / COMPLETED</b> ✅\n\n"
+            f"Dana Rupiah telah berhasil ditransfer oleh seller/admin ke rekening / e-Wallet Anda.\n"
+            f"Silakan periksa mutasi saldo rekening Anda. Terima kasih sudah bertransaksi! 🙏"
+        )
+        from bot.utils.telegram_utils import safe_send_message
+        menu_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_back")]])
+        await safe_send_message(context.bot, order.telegram_id, user_msg, reply_markup=menu_keyboard)
+
+        await query.answer("✅ Order berhasil dikonfirmasi sebagai COMPLETED!")
+        msg = query.message
+        if msg.caption:
+            caption_now = msg.caption or ""
+            await query.edit_message_caption(
+                caption=f"{caption_now}\n\n✅ <b>RUPIAH SUDAH DITRANSFER OLEH ADMIN (COMPLETED)</b>",
+                parse_mode="HTML"
+            )
+        elif msg.text:
+            text_now = msg.text or ""
+            await query.edit_message_text(
+                text=f"{text_now}\n\n✅ <b>RUPIAH SUDAH DITRANSFER OLEH ADMIN (COMPLETED)</b>",
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.error(f"Error admin_confirm_sell_callback {order_id}: {e}", exc_info=True)
+        await query.answer("❌ Gagal memproses konfirmasi.", show_alert=True)
     finally:
         db.close()
 

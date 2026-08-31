@@ -15,8 +15,8 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='no
 timeout /t 2 /nobreak >nul
 
 REM 2. Jalankan GoPay Gateway
-echo [2/3] Menjalankan GoPay Gateway (port 3000)...
-start "GoPay Gateway Port 3000" /min cmd /c "cd /d \"%~dp0gopay-gateway\" && node server.js"
+echo [2/3] Menjalankan GoPay Gateway (port 3005)...
+start "GoPay Gateway Port 3005" /min cmd /c "cd /d \"%~dp0gopay-gateway\" && node server.js"
 timeout /t 4 /nobreak >nul
 
 REM 3. Jalankan Bot Telegram

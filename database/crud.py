@@ -628,7 +628,8 @@ def get_low_balance_wallets(db: Session) -> list[WalletBalance]:
 
 def generate_unique_payment_code(db: Session) -> int:
     """
-    Menghasilkan 2-digit kode unik (1..99) yang belum dipakai oleh order/topup PENDING lainnya.
+    Menghasilkan 3-digit kode unik (1..999) yang belum dipakai oleh order/topup PENDING lainnya.
+    Mencegah tabrakan nominal saat ada 100+ pesanan berlangsung bersamaan.
     """
     import random
     try:
@@ -646,13 +647,13 @@ def generate_unique_payment_code(db: Session) -> int:
         }
         used_codes = pending_order_codes.union(pending_topup_codes)
 
-        available = [c for c in range(1, 100) if c not in used_codes]
+        available = [c for c in range(1, 1000) if c not in used_codes]
         if available:
             return random.choice(available)
-        return random.randint(1, 99)
+        return random.randint(1, 999)
     except Exception as e:
         logger.error(f"Gagal generate unique code: {e}")
-        return random.randint(1, 99)
+        return random.randint(1, 999)
 
 
 

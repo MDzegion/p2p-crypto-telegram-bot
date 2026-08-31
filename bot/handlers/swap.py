@@ -74,7 +74,7 @@ async def start_swap(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append(row)
     keyboard.append([InlineKeyboardButton("❌ Batal", callback_data="cancel_swap")])
 
-    text = "🔄 <b>[TUKAR ANTAK JARINGAN / OTC CONVERT]</b>\n\nSilakan pilih <b>Koin Asal</b> yang ingin kamu kirim:"
+    text = "🔄 <b>[TUKAR ANTAR JARINGAN / OTC CONVERT]</b>\n\nSilakan pilih <b>Koin Asal</b> yang ingin kamu kirim:"
     
     if query:
         await query.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -483,18 +483,9 @@ async def input_deposit_hash(update: Update, context: ContextTypes.DEFAULT_TYPE)
         menu_keyboard = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_back")]])
         if verified_result and verified_result.get("verified"):
             # Konfirmasi + eksekusi payout otomatis (kirim koin tujuan)
+            # Pesan status verifikasi dan hasil convert dikirimkan oleh deposit_detector._confirm_order
             await deposit_detector._confirm_order(
                 db, order, deposit_proof, verified_result, context.application
-            )
-            await update.message.reply_text(
-                f"✅ <b>DEPOSIT TERVERIFIKASI OTOMATIS!</b>\n\n"
-                f"ID Order: <code>{order.order_id}</code>\n"
-                f"Deposit: {format_crypto(verified_result.get('amount'), order.crypto_symbol)} "
-                f"({order.network})\n\n"
-                f"🔄 Koin tujuan <b>{order.target_crypto_symbol} ({order.target_network})</b> "
-                f"telah dikirim ke walletmu — cek notifikasi di atas untuk TX Hash pengiriman.",
-                parse_mode="HTML",
-                reply_markup=menu_keyboard
             )
         else:
             # Belum terlihat di chain -> detector akan memverifikasi ulang otomatis

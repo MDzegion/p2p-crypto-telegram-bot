@@ -36,11 +36,14 @@ _payout_locks = WeakValueDictionary()
 class DepositDetector:
     def __init__(self):
         self.is_running = False
+        self._processing_orders = set()
+        self._lock = asyncio.Lock()
 
     # ---------------- Main ----------------
     async def scan_incoming_deposits(self, bot_app=None):
         """
         Memindai deposit masuk untuk order berstatus WAITING_CRYPTO_DEPOSIT.
+        Dilengkapi in-memory locking agar tidak terjadi pemrosesan ganda / notifikasi dobel.
         """
         db = SessionLocal()
         try:
@@ -49,6 +52,17 @@ class DepositDetector:
             ).all()
 
             if not pending_orders:
+                return
+
+            # Filter order yang sedang diproses di cycle sebelumnya
+            orders_to_process = []
+            async with self._lock:
+                for o in pending_orders:
+                    if o.order_id not in self._processing_orders:
+                        self._processing_orders.add(o.order_id)
+                        orders_to_process.append(o)
+
+            if not orders_to_process:
                 return
 
             # Proses paralel (max 5) — verifikasi on-chain lambat, jangan antri.
@@ -64,8 +78,11 @@ class DepositDetector:
                             order.order_id, order_exc,
                             exc_info=True,
                         )
+                    finally:
+                        async with self._lock:
+                            self._processing_orders.discard(order.order_id)
 
-            await asyncio.gather(*(_proc(o) for o in pending_orders))
+            await asyncio.gather(*(_proc(o) for o in orders_to_process))
         except Exception as exc:
             logger.error("Error running DepositDetector: %s", exc, exc_info=True)
         finally:
@@ -203,9 +220,12 @@ class DepositDetector:
                         f"‼️ <b>TRANSFER RUPIAH SEGERA:</b> "
                         f"<b>{format_idr(order.total_idr)}</b> ke rekening:\n"
                         f"<code>{order.buyer_wallet}</code>\n\n"
-                        f"Setelah transfer, gunakan <code>/confirm {order.order_id}</code>."
+                        f"Setelah transfer, klik tombol di bawah atau ketik <code>/confirm {order.order_id}</code>."
                     )
-                    await notify_admins(bot_app, admin_msg)
+                    admin_keyboard = InlineKeyboardMarkup([[
+                        InlineKeyboardButton("✅ Konfirmasi Rupiah Terkirim", callback_data=f"admin_confirm_sell_{order.order_id}")
+                    ]])
+                    await notify_admins(bot_app, admin_msg, reply_markup=admin_keyboard)
                 except Exception as exc:
                     logger.warning("Gagal notif admin sell: %s", exc)
 

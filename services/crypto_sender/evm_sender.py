@@ -39,6 +39,14 @@ ERC20_ABI = [
     }
 ]
 
+_network_send_locks = {}
+
+def _get_network_send_lock(network: str) -> asyncio.Lock:
+    if network not in _network_send_locks:
+        _network_send_locks[network] = asyncio.Lock()
+    return _network_send_locks[network]
+
+
 class EVMSender(BaseCryptoSender):
     GAS_REVIEW_LIMIT_IDR = 2000
     # Konfigurasi tiap chain EVM beserta daftar RPC Fallback
@@ -60,11 +68,14 @@ class EVMSender(BaseCryptoSender):
         },
         "BSC": {
             "rpc_list": [
-                settings.BSC_RPC,
-                "https://binance.llamarpc.com",
-                "https://bsc-dataseed1.defibit.io",
-                "https://bsc-dataseed.binance.org",
-                "https://1rpc.io/bnb"
+                "https://bsc-dataseed.bnbchain.org",
+                "https://bsc.meowrpc.com",
+                "https://bsc-dataseed1.bnbchain.org",
+                "https://bsc-dataseed2.bnbchain.org",
+                "https://bsc-dataseed.defibit.io",
+                "https://bsc-dataseed.ninicoin.io",
+                "https://bsc.publicnode.com",
+                "https://binance.nodereal.io",
             ],
             "chain_id": 56,
             "explorer": "https://bscscan.com",
@@ -326,80 +337,92 @@ class EVMSender(BaseCryptoSender):
                     error_message=f"Saldo gas fee ({native_sym}) habis atau 0."
                 )
 
-            nonce = await asyncio.to_thread(self.w3.eth.get_transaction_count, self.wallet_address)
-            
-            # Dapatkan gas price saat ini dengan buffer 10%
-            def _get_gas_price():
-                return self.w3.eth.gas_price
-            gas_price_raw = await asyncio.to_thread(_get_gas_price)
-            gas_price = int(gas_price_raw * 1.1)
+            # Gunakan mutex lock per-network agar saat 100+ transaksi bersamaan,
+            # pengambilan nonce 'pending', penandatanganan, dan broadcast berjalan berurutan
+            # tanpa tabrakan nomor urut nonce (nonce collision).
+            lock = _get_network_send_lock(self.network)
+            async with lock:
+                def _get_nonce():
+                    try:
+                        return self.w3.eth.get_transaction_count(self.wallet_address, 'pending')
+                    except Exception:
+                        return self.w3.eth.get_transaction_count(self.wallet_address)
 
-            gas_estimation_failed = False
-            if symbol_upper == native_sym:
-                # --- Kirim Native Coin (BNB, ETH, AVAX, MATIC, G) ---
-                amount_wei = self.w3.to_wei(amount, 'ether')
+                nonce = await asyncio.to_thread(_get_nonce)
                 
-                tx = {
-                    'nonce': nonce,
-                    'to': to_checksum,
-                    'value': amount_wei,
-                    'gas': 21000,
-                    'gasPrice': gas_price,
-                    'chainId': self.config["chain_id"]
-                }
-            else:
-                # --- Kirim ERC-20 Token (USDT) ---
-                token_address = self.config["tokens"].get(symbol_upper)
-                if not token_address:
+                # Dapatkan gas price saat ini dengan buffer 10%
+                def _get_gas_price():
+                    return self.w3.eth.gas_price
+                gas_price_raw = await asyncio.to_thread(_get_gas_price)
+                gas_price = int(gas_price_raw * 1.1)
+
+                gas_estimation_failed = False
+                if symbol_upper == native_sym:
+                    # --- Kirim Native Coin (BNB, ETH, AVAX, MATIC, G) ---
+                    amount_wei = self.w3.to_wei(amount, 'ether')
+                    
+                    tx = {
+                        'nonce': nonce,
+                        'to': to_checksum,
+                        'value': amount_wei,
+                        'gas': 21000,
+                        'gasPrice': gas_price,
+                        'chainId': self.config["chain_id"]
+                    }
+                else:
+                    # --- Kirim ERC-20 Token (USDT) ---
+                    token_address = self.config["tokens"].get(symbol_upper)
+                    if not token_address:
+                        return SendResult(
+                            success=False,
+                            error_message=f"Token '{symbol_upper}' tidak terdaftar di network {self.network}"
+                        )
+                    
+                    checksum_token = Web3.to_checksum_address(token_address)
+                    contract = self.w3.eth.contract(address=checksum_token, abi=ERC20_ABI)
+                    
+                    decimals = await asyncio.to_thread(contract.functions.decimals().call)
+                    # Parse amount ke format raw token unit berdasarkan decimals
+                    raw_amount = int(Decimal(str(amount)) * Decimal(10 ** decimals))
+                    
+                    # Build contract transfer function call
+                    tx_data = contract.functions.transfer(to_checksum, raw_amount)
+                    
+                    # Estimate gas limit
+                    try:
+                        gas_estimate = await asyncio.to_thread(tx_data.estimate_gas, {'from': self.wallet_address})
+                        gas_limit = int(gas_estimate * 1.2) # 20% safety margin
+                    except Exception as gas_err:
+                        logger.warning(f"Gagal estimasi gas, menggunakan default: {gas_err}")
+                        gas_limit = 100000 # default fallback untuk ERC20 transfer
+                        gas_estimation_failed = True
+                    
+                    tx = tx_data.build_transaction({
+                        'chainId': self.config["chain_id"],
+                        'gas': gas_limit,
+                        'gasPrice': gas_price,
+                        'nonce': nonce,
+                    })
+
+                if self.network == "ETH" and gas_estimation_failed:
                     return SendResult(
                         success=False,
-                        error_message=f"Token '{symbol_upper}' tidak terdaftar di network {self.network}"
+                        error_message="MANUAL_REVIEW: Estimasi gas ETH L1 gagal.",
                     )
-                
-                checksum_token = Web3.to_checksum_address(token_address)
-                contract = self.w3.eth.contract(address=checksum_token, abi=ERC20_ABI)
-                
-                decimals = await asyncio.to_thread(contract.functions.decimals().call)
-                # Parse amount ke format raw token unit berdasarkan decimals
-                raw_amount = int(Decimal(str(amount)) * Decimal(10 ** decimals))
-                
-                # Build contract transfer function call
-                tx_data = contract.functions.transfer(to_checksum, raw_amount)
-                
-                # Estimate gas limit
-                try:
-                    gas_estimate = await asyncio.to_thread(tx_data.estimate_gas, {'from': self.wallet_address})
-                    gas_limit = int(gas_estimate * 1.2) # 20% safety margin
-                except Exception as gas_err:
-                    logger.warning(f"Gagal estimasi gas, menggunakan default: {gas_err}")
-                    gas_limit = 100000 # default fallback untuk ERC20 transfer
-                    gas_estimation_failed = True
-                
-                tx = tx_data.build_transaction({
-                    'chainId': self.config["chain_id"],
-                    'gas': gas_limit,
-                    'gasPrice': gas_price,
-                    'nonce': nonce,
-                })
 
-            if self.network == "ETH" and gas_estimation_failed:
-                return SendResult(
-                    success=False,
-                    error_message="MANUAL_REVIEW: Estimasi gas ETH L1 gagal.",
-                )
+                gas_review = await self._gas_review_reason(gas_limit, gas_price)
+                if gas_review:
+                    return SendResult(success=False, error_message=gas_review)
 
-            gas_review = await self._gas_review_reason(gas_limit, gas_price)
-            if gas_review:
-                return SendResult(success=False, error_message=gas_review)
+                # Sign transaction
+                signed_tx = self.w3.eth.account.sign_transaction(tx, private_key=self.private_key)
+                
+                # Broadcast transaction (masuk ke mempool on-chain)
+                tx_hash_bytes = await asyncio.to_thread(self.w3.eth.send_raw_transaction, signed_tx.raw_transaction)
+                tx_hash_str = self.w3.to_hex(tx_hash_bytes)
 
-            # Sign transaction
-            signed_tx = self.w3.eth.account.sign_transaction(tx, private_key=self.private_key)
-            
-            # Broadcast transaction
-            tx_hash_bytes = await asyncio.to_thread(self.w3.eth.send_raw_transaction, signed_tx.raw_transaction)
-            tx_hash_str = self.w3.to_hex(tx_hash_bytes)
-            
-            # Buat link explorer
+            # --- Di Luar Lock (Asynchronous Parallel): Tunggu Receipt ---
+            # Lock dilepas setelah broadcast agar transaksi berikutnya langsung dapat nonce selanjutnya
             explorer_url = f"{explorer_base}/tx/{tx_hash_str}"
             
             # Tunggu receipt transaksi (max 60 detik)

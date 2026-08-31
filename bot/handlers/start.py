@@ -164,6 +164,10 @@ async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TY
         from bot.handlers.admin import admin_reject_topup_callback
         await admin_reject_topup_callback(update, context)
 
+    elif data.startswith("admin_confirm_sell_"):
+        from bot.handlers.admin import admin_confirm_sell_callback
+        await admin_confirm_sell_callback(update, context)
+
     elif data == "menu_price":
         from bot.handlers.price import show_prices
         await show_prices(update, context)
