@@ -10,12 +10,15 @@ import threading
 import time
 import gradio as gr
 
-def start_all_background_services():
-    """Worker background untuk inisialisasi dan menjalankan servis."""
-    gateway_dir = os.path.join(os.path.dirname(__file__), "gopay-gateway")
-    node_modules = os.path.join(gateway_dir, "node_modules")
+def init_and_run_services():
+    """Jalankan servis setelah Gradio siap dan lolos healthcheck Hugging Face."""
+    # Beri jeda 5 detik agar port 7860 merespons healthcheck Space terlebih dahulu
+    time.sleep(5)
+    print("🚀 [STARTUP] Memulai inisialisasi background services...")
 
-    # 1. Setup gopay-gateway/.env jika belum ada
+    gateway_dir = os.path.join(os.path.dirname(__file__), "gopay-gateway")
+    
+    # 1. Setup gopay-gateway/.env
     gateway_env = os.path.join(gateway_dir, ".env")
     if not os.path.exists(gateway_env):
         qris_static = os.environ.get("QRIS_STATIC", "00020101021126680016ID.CO.GOPAY.WWW01189360001438922870000215ID10265038922870303UKE51440014ID.CO.QRIS.WWW0215ID10265038922870303UKE5204729953033605802ID5936TOKO DIGITAL HSN, DIGITAL & KREATIF6011DKI JAKARTA61051212162070703A01630453D8")
@@ -23,19 +26,20 @@ def start_all_background_services():
         with open(gateway_env, "w", encoding="utf-8") as f:
             f.write(f"PORT=3005\nAPI_KEY=RAHASIA\nQRIS_STATIC={qris_static}\nGOPAY_MERCHANT_ID={merchant_id}\n")
 
-    # 2. Pulihkan sesi login GoPay jika disediakan di secrets
+    # 2. Setup Sesi GoBiz jika disediakan di secrets
     session_json_data = os.environ.get("GOPAY_SESSION_JSON")
     if session_json_data:
         session_file = os.path.join(gateway_dir, ".GOPAY_SESI_JANGAN_DIHAPUS.json")
         with open(session_file, "w", encoding="utf-8") as f:
             f.write(session_json_data.strip())
-        print("🔑 [GOPAY] Sesi GoBiz berhasil dimuat dari environment secrets.")
+        print("🔑 [GOPAY] Sesi GoBiz berhasil dimuat dari secrets.")
 
     # 3. Install node_modules jika belum ada
+    node_modules = os.path.join(gateway_dir, "node_modules")
     if not os.path.exists(node_modules):
         print("📦 [NPM] Menginstall dependensi gopay-gateway...")
         try:
-            subprocess.run(["npm", "install", "--production"], cwd=gateway_dir, check=True)
+            subprocess.run(["npm", "install", "--omit=dev", "--no-audit", "--no-fund", "--silent"], cwd=gateway_dir, check=True)
         except Exception as e:
             print(f"⚠️ [NPM WARNING] Gagal npm install: {e}")
 
@@ -44,22 +48,23 @@ def start_all_background_services():
     try:
         subprocess.Popen(["node", "server.js"], cwd=gateway_dir)
     except Exception as e:
-        print(f"⚠️ [GATEWAY ERROR] {e}")
+        print(f"⚠️ [GATEWAY ERROR] Gagal start gateway: {e}")
+
+    time.sleep(2)
 
     # 5. Jalankan Telegram Bot (Python)
     print("🤖 [BOT] Menjalankan Telegram Bot main.py...")
     try:
         subprocess.Popen([sys.executable, "main.py"])
     except Exception as e:
-        print(f"⚠️ [BOT ERROR] {e}")
+        print(f"⚠️ [BOT ERROR] Gagal start main.py: {e}")
 
 
-# Langsung spawn worker background di daemon thread terpisah
-bg_thread = threading.Thread(target=start_all_background_services, daemon=True)
-bg_thread.start()
+# Jalankan worker background di daemon thread
+threading.Thread(target=init_and_run_services, daemon=True).start()
 
-def check_system_status():
-    return "🟢 Status: ACTIVE 24/7\n• Telegram Bot: Polling Updates\n• GoPay Gateway: Active (Port 3005)\n• On-chain Monitor: Running (Interval 20s)"
+def get_status():
+    return "🟢 Status: RUNNING 24/7\n• Telegram Bot: Polling Active\n• GoPay Gateway: Active (Port 3005)\n• On-chain Monitor: Running (20s interval)"
 
 # Gradio Web UI
 with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
@@ -68,15 +73,11 @@ with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
     
     status_output = gr.Textbox(
         label="Service Status",
-        value=check_system_status(),
+        value=get_status(),
         interactive=False,
         lines=4
     )
     refresh_btn = gr.Button("🔄 Refresh Status")
-    refresh_btn.click(fn=check_system_status, outputs=status_output)
+    refresh_btn.click(fn=get_status, outputs=status_output)
 
 demo.launch(server_name="0.0.0.0", server_port=7860)
-
-# Menahan proses utama agar tidak pernah exit
-while True:
-    time.sleep(3600)
