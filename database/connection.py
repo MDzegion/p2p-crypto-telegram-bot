@@ -3,7 +3,12 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from config.settings import settings
 
 # Determine DB URL
-db_url = settings.DATABASE_URL
+raw_db_url = str(settings.DATABASE_URL or "").strip().strip('"').strip("'")
+if not raw_db_url or not (raw_db_url.startswith("sqlite") or raw_db_url.startswith("postgresql") or raw_db_url.startswith("mysql")):
+    db_url = "sqlite:///./p2p_bot.db"
+else:
+    db_url = raw_db_url
+
 if db_url.startswith("sqlite"):
     # SQLite requires check_same_thread=False for multi-thread access.
     # WAL + busy_timeout: banyak handler nulis bersamaan tidak boleh
