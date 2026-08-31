@@ -4,37 +4,18 @@ Menjalankan GoPay Gateway (Node.js) dan Telegram Bot (Python) di background 24/7
 """
 
 import os
+# Nonaktifkan SSR internal Gradio agar tidak crash dengan Node.js lokal
+os.environ["GRADIO_SSR_MODE"] = "False"
+os.environ["GRADIO_ANALYTICS_ENABLED"] = "False"
+
 import sys
 import subprocess
 import threading
 import time
-from fastapi import FastAPI
 import gradio as gr
-import uvicorn
 
-app = FastAPI(title="P2P Crypto Bot Live Monitor")
-
-def get_status():
-    return "🟢 Status: ACTIVE 24/7\n• Telegram Bot: Polling Active\n• GoPay Gateway: Active (Port 3005)\n• On-chain Monitor: Running (20s interval)"
-
-with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
-    gr.Markdown("# 🤖 P2P Crypto Telegram Bot — Live Server")
-    gr.Markdown("Servis Bot Telegram dan GoPay Gateway berjalan aktif 24 jam nonstop di cloud.")
-    
-    status_output = gr.Textbox(
-        label="Service Status",
-        value=get_status(),
-        interactive=False,
-        lines=4
-    )
-    refresh_btn = gr.Button("🔄 Refresh Status")
-    refresh_btn.click(fn=get_status, outputs=status_output)
-
-# Mount Gradio langsung ke FastAPI pada root path (memenuhi semua endpoint /config dan SSR Gradio)
-app = gr.mount_gradio_app(app, demo, path="/")
-
-def run_services():
-    """Worker background untuk inisialisasi dan menjalankan servis."""
+def init_and_run_services():
+    """Jalankan servis di background setelah web UI siap."""
     time.sleep(3)
     print("🚀 [STARTUP] Memulai inisialisasi background services...")
 
@@ -83,7 +64,22 @@ def run_services():
 
 
 # Jalankan worker background di daemon thread
-threading.Thread(target=run_services, daemon=True).start()
+threading.Thread(target=init_and_run_services, daemon=True).start()
 
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=7860)
+def get_status():
+    return "🟢 Status: ACTIVE 24/7\n• Telegram Bot: Polling Active\n• GoPay Gateway: Active (Port 3005)\n• On-chain Monitor: Running (20s interval)"
+
+with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
+    gr.Markdown("# 🤖 P2P Crypto Telegram Bot — Live Server")
+    gr.Markdown("Servis Bot Telegram dan GoPay Gateway berjalan aktif 24 jam nonstop di cloud.")
+    
+    status_output = gr.Textbox(
+        label="Service Status",
+        value=get_status(),
+        interactive=False,
+        lines=4
+    )
+    refresh_btn = gr.Button("🔄 Refresh Status")
+    refresh_btn.click(fn=get_status, outputs=status_output)
+
+demo.launch(server_name="0.0.0.0", server_port=7860)
