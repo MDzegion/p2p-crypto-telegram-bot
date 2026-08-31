@@ -10,8 +10,26 @@ import threading
 import time
 import gradio as gr
 
+def ensure_node():
+    """Download pre-built Node.js 20 Linux x64 standalone binary jika belum ada."""
+    base_dir = os.path.dirname(__file__)
+    node_dir = os.path.join(base_dir, "bin_node")
+    node_bin = os.path.join(node_dir, "bin", "node")
+    npm_bin = os.path.join(node_dir, "bin", "npm")
+
+    if not os.path.exists(node_bin):
+        print("📦 [NODE] Mengunduh standalone Node.js 20 runtime...")
+        try:
+            os.makedirs(node_dir, exist_ok=True)
+            url = "https://nodejs.org/dist/v20.18.0/node-v20.18.0-linux-x64.tar.gz"
+            subprocess.run(f"curl -sL {url} | tar -xz --strip-components=1 -C {node_dir}", shell=True, check=True)
+            print("✅ [NODE] Standalone Node.js siap digunakan.")
+        except Exception as e:
+            print(f"⚠️ [NODE ERROR] Gagal download node: {e}")
+    return node_bin, npm_bin
+
 def init_and_run_services():
-    """Jalankan servis di background."""
+    """Jalankan servis di background setelah web UI siap."""
     time.sleep(3)
     print("🚀 [STARTUP] Memulai inisialisasi background services...")
 
@@ -33,19 +51,23 @@ def init_and_run_services():
             f.write(session_json_data.strip())
         print("🔑 [GOPAY] Sesi GoBiz berhasil dimuat dari secrets.")
 
-    # 3. Install node_modules jika belum ada
+    # 3. Setup standalone node dan install node_modules jika belum ada
+    node_bin, npm_bin = ensure_node()
     node_modules = os.path.join(gateway_dir, "node_modules")
-    if not os.path.exists(node_modules):
+    if not os.path.exists(node_modules) and os.path.exists(npm_bin):
         print("📦 [NPM] Menginstall dependensi gopay-gateway...")
         try:
-            subprocess.run(["npm", "install", "--omit=dev", "--no-audit", "--no-fund", "--silent"], cwd=gateway_dir, check=True)
+            subprocess.run([npm_bin, "install", "--omit=dev", "--no-audit", "--no-fund"], cwd=gateway_dir, check=True)
         except Exception as e:
             print(f"⚠️ [NPM WARNING] Gagal npm install: {e}")
 
     # 4. Jalankan GoPay Gateway (Node.js) di port 3005
     print("🟢 [GATEWAY] Menjalankan GoPay Partner Gateway di port 3005...")
     try:
-        subprocess.Popen(["node", "server.js"], cwd=gateway_dir)
+        if os.path.exists(node_bin):
+            subprocess.Popen([node_bin, "server.js"], cwd=gateway_dir)
+        else:
+            subprocess.Popen(["node", "server.js"], cwd=gateway_dir)
     except Exception as e:
         print(f"⚠️ [GATEWAY ERROR] Gagal start gateway: {e}")
 
@@ -78,4 +100,4 @@ with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
     refresh_btn = gr.Button("🔄 Refresh Status")
     refresh_btn.click(fn=get_status, outputs=status_output)
 
-demo.launch(ssr_mode=False, server_name="0.0.0.0", server_port=7860)
+demo.launch(server_name="0.0.0.0", server_port=7860, prevent_thread_lock=False)
