@@ -13,10 +13,25 @@ def start_background_services():
     """Jalankan kedua servis di background."""
     print("🚀 [STARTUP] Menyiapkan environment dual-service...")
 
-    # 1. Install dependensi Node.js jika belum ada
     gateway_dir = os.path.join(os.path.dirname(__file__), "gopay-gateway")
     node_modules = os.path.join(gateway_dir, "node_modules")
     
+    # Buat file gopay-gateway/.env jika belum ada
+    gateway_env = os.path.join(gateway_dir, ".env")
+    if not os.path.exists(gateway_env):
+        qris_static = os.environ.get("QRIS_STATIC", "00020101021126680016ID.CO.GOPAY.WWW01189360001438922870000215ID10265038922870303UKE51440014ID.CO.QRIS.WWW0215ID10265038922870303UKE5204729953033605802ID5936TOKO DIGITAL HSN, DIGITAL & KREATIF6011DKI JAKARTA61051212162070703A01630453D8")
+        merchant_id = os.environ.get("GOPAY_MERCHANT_ID", "G292229702")
+        with open(gateway_env, "w", encoding="utf-8") as f:
+            f.write(f"PORT=3005\nAPI_KEY=RAHASIA\nQRIS_STATIC={qris_static}\nGOPAY_MERCHANT_ID={merchant_id}\n")
+
+    # Pulihkan sesi login GoPay jika disediakan di secrets
+    session_json_data = os.environ.get("GOPAY_SESSION_JSON")
+    if session_json_data:
+        session_file = os.path.join(gateway_dir, ".GOPAY_SESI_JANGAN_DIHAPUS.json")
+        with open(session_file, "w", encoding="utf-8") as f:
+            f.write(session_json_data.strip())
+        print("🔑 [GOPAY] Sesi GoBiz berhasil dimuat dari environment secrets.")
+
     if not os.path.exists(node_modules):
         print("📦 [NPM] Menginstall dependensi gopay-gateway...")
         try:
@@ -27,7 +42,7 @@ def start_background_services():
     # 2. Jalankan GoPay Gateway (Node.js) di port 3005
     print("🟢 [GATEWAY] Menjalankan GoPay Partner Gateway...")
     try:
-        subprocess.Popen([sys.executable.replace("python", "node") if False else "node", "server.js"], cwd=gateway_dir)
+        subprocess.Popen(["node", "server.js"], cwd=gateway_dir)
     except Exception as e:
         print(f"⚠️ [GATEWAY ERROR] Gagal start node server.js: {e}")
 
