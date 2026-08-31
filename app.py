@@ -1,22 +1,20 @@
 """
 app.py — Hugging Face Space Entrypoint & Live Monitor Dashboard
-Menjalankan GoPay Gateway (Node.js) dan Telegram Bot (Python) secara bersamaan di background 24/7.
+Menjalankan GoPay Gateway (Node.js) dan Telegram Bot (Python) di background 24/7.
 """
 
 import os
 import sys
 import subprocess
 import time
+import threading
 import gradio as gr
 
-def start_background_services():
-    """Jalankan kedua servis di background."""
-    print("🚀 [STARTUP] Menyiapkan environment dual-service...")
-
+def prepare_gopay_gateway():
     gateway_dir = os.path.join(os.path.dirname(__file__), "gopay-gateway")
     node_modules = os.path.join(gateway_dir, "node_modules")
     
-    # Buat file gopay-gateway/.env jika belum ada
+    # 1. Setup .env jika belum ada
     gateway_env = os.path.join(gateway_dir, ".env")
     if not os.path.exists(gateway_env):
         qris_static = os.environ.get("QRIS_STATIC", "00020101021126680016ID.CO.GOPAY.WWW01189360001438922870000215ID10265038922870303UKE51440014ID.CO.QRIS.WWW0215ID10265038922870303UKE5204729953033605802ID5936TOKO DIGITAL HSN, DIGITAL & KREATIF6011DKI JAKARTA61051212162070703A01630453D8")
@@ -24,7 +22,7 @@ def start_background_services():
         with open(gateway_env, "w", encoding="utf-8") as f:
             f.write(f"PORT=3005\nAPI_KEY=RAHASIA\nQRIS_STATIC={qris_static}\nGOPAY_MERCHANT_ID={merchant_id}\n")
 
-    # Pulihkan sesi login GoPay jika disediakan di secrets
+    # 2. Pulihkan sesi login GoPay jika disediakan di secrets
     session_json_data = os.environ.get("GOPAY_SESSION_JSON")
     if session_json_data:
         session_file = os.path.join(gateway_dir, ".GOPAY_SESI_JANGAN_DIHAPUS.json")
@@ -32,6 +30,7 @@ def start_background_services():
             f.write(session_json_data.strip())
         print("🔑 [GOPAY] Sesi GoBiz berhasil dimuat dari environment secrets.")
 
+    # 3. Install node_modules jika belum ada
     if not os.path.exists(node_modules):
         print("📦 [NPM] Menginstall dependensi gopay-gateway...")
         try:
@@ -39,29 +38,32 @@ def start_background_services():
         except Exception as e:
             print(f"⚠️ [NPM WARNING] Gagal npm install: {e}")
 
-    # 2. Jalankan GoPay Gateway (Node.js) di port 3005
+    # 4. Jalankan Node.js server
     print("🟢 [GATEWAY] Menjalankan GoPay Partner Gateway...")
     try:
-        subprocess.Popen(["node", "server.js"], cwd=gateway_dir)
+        subprocess.run(["node", "server.js"], cwd=gateway_dir)
     except Exception as e:
-        print(f"⚠️ [GATEWAY ERROR] Gagal start node server.js: {e}")
+        print(f"⚠️ [GATEWAY ERROR] {e}")
 
-    time.sleep(2)
-
-    # 3. Jalankan Telegram Bot (Python)
+def run_telegram_bot():
     print("🤖 [BOT] Menjalankan Telegram Bot main.py...")
     try:
-        subprocess.Popen([sys.executable, "main.py"])
+        subprocess.run([sys.executable, "main.py"])
     except Exception as e:
-        print(f"⚠️ [BOT ERROR] Gagal start python main.py: {e}")
+        print(f"⚠️ [BOT ERROR] {e}")
 
+# Jalankan kedua background worker di daemon thread terpisah
+t_gw = threading.Thread(target=prepare_gopay_gateway, daemon=True)
+t_gw.start()
 
-# Jalankan servis saat file di-load
-start_background_services()
+time.sleep(3)
+
+t_bot = threading.Thread(target=run_telegram_bot, daemon=True)
+t_bot.start()
 
 def check_system_status():
     """Fungsi status untuk tampilan web monitor di Hugging Face."""
-    return "🟢 Status: ACTIVE\n• Telegram Bot: Polling Updates\n• GoPay Gateway: Active (Port 3005)\n• On-chain Monitor: Running (Interval 20s)"
+    return "🟢 Status: ACTIVE 24/7\n• Telegram Bot: Polling Updates\n• GoPay Gateway: Active (Port 3005)\n• On-chain Monitor: Running (Interval 20s)"
 
 # Gradio Web UI
 with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
@@ -77,8 +79,4 @@ with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
     refresh_btn = gr.Button("🔄 Refresh Status")
     refresh_btn.click(fn=check_system_status, outputs=status_output)
 
-demo.queue().launch(server_name="0.0.0.0", server_port=7860, prevent_thread_lock=False)
-
-# Keep main thread alive forever
-while True:
-    time.sleep(3600)
+demo.launch(server_name="0.0.0.0", server_port=7860)
