@@ -59,9 +59,18 @@ class Settings:
     TON_WALLET_ADDRESS = (os.getenv("TON_WALLET_ADDRESS") or "").strip()
 
     APTOS_RPC = (os.getenv("APTOS_RPC", "https://fullnode.mainnet.aptoslabs.com/v1") or "").strip()
+    APTOS_PRIVATE_KEY = (os.getenv("APTOS_PRIVATE_KEY") or "").strip()
+    APTOS_WALLET_ADDRESS = (os.getenv("APTOS_WALLET_ADDRESS") or "").strip()
+    
+    _admin_group = (os.getenv("ADMIN_GROUP_ID") or "").strip()
+    ADMIN_GROUP_ID = int(_admin_group) if _admin_group and _admin_group.lstrip("-").isdigit() else None
 
     # App logic configurations
     ORDER_EXPIRE_MINUTES = int(os.getenv("ORDER_EXPIRE_MINUTES", 30))
+    DEFAULT_SPREAD_PCT = float(os.getenv("DEFAULT_SPREAD_PCT", 1.5))
+    ENABLE_LOW_BALANCE_ALERT = os.getenv("ENABLE_LOW_BALANCE_ALERT", "false").lower() in ("true", "1", "yes")
+    LOW_BALANCE_ALERT_HOURS = int(os.getenv("LOW_BALANCE_ALERT_HOURS", 6))
+
 settings = Settings()
 
 print(f"[CONFIG] Token Bot Terdeteksi: {bool(settings.TELEGRAM_BOT_TOKEN)} (Panjang: {len(settings.TELEGRAM_BOT_TOKEN)})")
