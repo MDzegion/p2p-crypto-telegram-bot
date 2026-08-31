@@ -14,7 +14,7 @@ process.on('unhandledRejection', (reason, promise) => {
     console.error(`[UNHANDLED_REJECTION] Reason:`, reason);
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.GOPAY_PORT || 3005;
 const MAX_LOGS = 100;
 const CLAIMED_CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 jam
 const QRIS_EXPIRY_MS = 5 * 60 * 1000; // 5 menit
@@ -731,7 +731,7 @@ app.get('/api/logs', apiKeyAuth, (req, res) => {
     res.json({ success: true, logs: activityLogs });
 });
 
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
     logActivity('SYSTEM', `GoPay Partner Gateway berjalan pada port ${PORT}`);
 });
 
