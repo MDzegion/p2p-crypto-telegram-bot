@@ -1,5 +1,5 @@
 """
-app.py — Hugging Face Space Entrypoint & Live Monitor Dashboard
+app.py — Hugging Face Space Entrypoint & 24/7 Dual Service Runner
 Menjalankan GoPay Gateway (Node.js) dan Telegram Bot (Python) di background 24/7.
 """
 
@@ -8,12 +8,29 @@ import sys
 import subprocess
 import threading
 import time
-import gradio as gr
+from fastapi import FastAPI
+import uvicorn
 
-def init_and_run_services():
-    """Jalankan servis setelah Gradio siap dan lolos healthcheck Hugging Face."""
-    # Beri jeda 5 detik agar port 7860 merespons healthcheck Space terlebih dahulu
-    time.sleep(5)
+app = FastAPI(title="P2P Crypto Telegram Bot Monitor")
+
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "service": "P2P Crypto Telegram Bot",
+        "gopay_gateway": "active_port_3005",
+        "bot_polling": "active",
+        "uptime": "24/7 cloud live"
+    }
+
+@app.get("/healthz")
+def health():
+    return {"status": "ok"}
+
+def run_services():
+    """Worker background untuk inisialisasi dan menjalankan servis."""
+    # Beri jeda 3 detik agar uvicorn server di port 7860 sudah bind dan siap merespons healthcheck Space
+    time.sleep(3)
     print("🚀 [STARTUP] Memulai inisialisasi background services...")
 
     gateway_dir = os.path.join(os.path.dirname(__file__), "gopay-gateway")
@@ -44,7 +61,7 @@ def init_and_run_services():
             print(f"⚠️ [NPM WARNING] Gagal npm install: {e}")
 
     # 4. Jalankan GoPay Gateway (Node.js) di port 3005
-    print("🟢 [GATEWAY] Menjalankan GoPay Partner Gateway...")
+    print("🟢 [GATEWAY] Menjalankan GoPay Partner Gateway di port 3005...")
     try:
         subprocess.Popen(["node", "server.js"], cwd=gateway_dir)
     except Exception as e:
@@ -61,23 +78,7 @@ def init_and_run_services():
 
 
 # Jalankan worker background di daemon thread
-threading.Thread(target=init_and_run_services, daemon=True).start()
+threading.Thread(target=run_services, daemon=True).start()
 
-def get_status():
-    return "🟢 Status: RUNNING 24/7\n• Telegram Bot: Polling Active\n• GoPay Gateway: Active (Port 3005)\n• On-chain Monitor: Running (20s interval)"
-
-# Gradio Web UI
-with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
-    gr.Markdown("# 🤖 P2P Crypto Telegram Bot — Live Server")
-    gr.Markdown("Servis Bot Telegram dan GoPay Gateway berjalan aktif 24 jam nonstop di cloud.")
-    
-    status_output = gr.Textbox(
-        label="Service Status",
-        value=get_status(),
-        interactive=False,
-        lines=4
-    )
-    refresh_btn = gr.Button("🔄 Refresh Status")
-    refresh_btn.click(fn=get_status, outputs=status_output)
-
-demo.launch(server_name="0.0.0.0", server_port=7860)
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=7860)
