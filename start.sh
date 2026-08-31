@@ -3,6 +3,9 @@ set -e
 
 echo "🚀 [STARTUP] Menyiapkan environment dual-service..."
 
+# 0. Dump environment variables to .env so Python load_dotenv() always sees them
+printenv > /app/.env || true
+
 # 1. Pulihkan sesi login GoPay jika disediakan di secrets
 if [ -n "$GOPAY_SESSION_JSON" ]; then
     echo "$GOPAY_SESSION_JSON" > /app/gopay-gateway/.GOPAY_SESI_JANGAN_DIHAPUS.json
