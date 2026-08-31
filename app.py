@@ -7,6 +7,7 @@ import os
 import sys
 import subprocess
 import threading
+import time
 import gradio as gr
 
 def start_all_background_services():
@@ -74,5 +75,8 @@ with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
     refresh_btn = gr.Button("🔄 Refresh Status")
     refresh_btn.click(fn=check_system_status, outputs=status_output)
 
-if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+demo.launch(server_name="0.0.0.0", server_port=7860)
+
+# Menahan proses utama agar tidak pernah exit
+while True:
+    time.sleep(3600)
