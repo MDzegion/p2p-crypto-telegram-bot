@@ -604,3 +604,93 @@ async def admin_reject_topup_callback(update: Update, context: ContextTypes.DEFA
         )
     finally:
         db.close()
+
+
+async def admin_approve_swap_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback tombol Admin: Approve & eksekusi pengiriman koin tujuan Swap."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not is_admin(user_id):
+        await query.answer("❌ Akses ditolak.", show_alert=True)
+        return
+
+    order_id = query.data.replace("admin_approve_swap_", "")
+    db = SessionLocal()
+    try:
+        order = crud.get_order_by_id(db, order_id)
+        if not order:
+            await query.answer("❌ Order tidak ditemukan.", show_alert=True)
+            return
+
+        if order.status == "COMPLETED" or order.payout_tx_hash:
+            await query.answer("ℹ️ Order ini sudah COMPLETED.", show_alert=True)
+            return
+
+        await query.answer("⚡ Menyetujui deposit & mengeksekusi payout swap...", show_alert=False)
+
+        # Ubah status ke CRYPTO_CONFIRMED agar dapat dipayout
+        order.status = "CRYPTO_CONFIRMED"
+        order.confirmed_at = datetime.utcnow()
+        db.commit()
+
+        from services.detector import deposit_detector
+        await deposit_detector._execute_payout(db, order, context.application)
+
+        caption_now = query.message.caption or ""
+        text_now = query.message.text or ""
+        if caption_now:
+            await query.edit_message_caption(
+                caption=f"{caption_now}\n\n✅ <b>SWAP DI-APPROVE & DIEKSEKUSI OLEH ADMIN</b>",
+                parse_mode="HTML"
+            )
+        elif text_now:
+            await query.edit_message_text(
+                text=f"{text_now}\n\n✅ <b>SWAP DI-APPROVE & DIEKSEKUSI OLEH ADMIN</b>",
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.error(f"Error admin_approve_swap_callback {order_id}: {e}", exc_info=True)
+        await query.answer(f"❌ Error: {e}", show_alert=True)
+    finally:
+        db.close()
+
+
+async def admin_reject_swap_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback tombol Admin: Tolak pesanan swap."""
+    query = update.callback_query
+    user_id = query.from_user.id
+    if not is_admin(user_id):
+        await query.answer("❌ Akses ditolak.", show_alert=True)
+        return
+
+    order_id = query.data.replace("admin_reject_swap_", "")
+    db = SessionLocal()
+    try:
+        crud.update_order_status(db, order_id, "CANCELLED")
+        order = crud.get_order_by_id(db, order_id)
+        if order:
+            from bot.utils.telegram_utils import safe_send_message
+            await safe_send_message(
+                context.bot, order.telegram_id,
+                f"❌ <b>Pesanan Swap {order_id} Dibatalkan</b>\n\n"
+                f"Bukti transfer deposit tidak dapat diverifikasi oleh admin. "
+                f"Silakan hubungi admin jika terdapat kekeliruan."
+            )
+        await query.answer("Swap berhasil ditolak/dibatalkan.")
+        caption_now = query.message.caption or ""
+        text_now = query.message.text or ""
+        if caption_now:
+            await query.edit_message_caption(
+                caption=f"{caption_now}\n\n❌ <b>DITOLAK OLEH ADMIN</b>",
+                parse_mode="HTML"
+            )
+        elif text_now:
+            await query.edit_message_text(
+                text=f"{text_now}\n\n❌ <b>DITOLAK OLEH ADMIN</b>",
+                parse_mode="HTML"
+            )
+    except Exception as e:
+        logger.error(f"Error admin_reject_swap_callback {order_id}: {e}", exc_info=True)
+    finally:
+        db.close()
+

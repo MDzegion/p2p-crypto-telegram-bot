@@ -426,77 +426,76 @@ async def get_recent_incoming(network, symbol, wallet, min_amount=0.0, limit=20)
 
 async def _scan_evm_incoming(network, symbol, wallet, min_amount, limit):
     sender = CryptoSenderFactory.get_sender(network)
-    w3 = sender.w3
     native_sym = sender.config.get("native_symbol")
     symbol_upper = symbol.upper()
     results = []
 
-    try:
-        latest = await asyncio.to_thread(lambda: w3.eth.block_number)
-    except Exception as exc:
-        logger.warning("Gagal ambil latest block %s: %s", network, exc)
-        return []
-
-    if symbol_upper == native_sym:
-        # Scan blok terakhir (cap 15 blok agar tidak membebani RPC)
-        from_block = max(0, latest - 15)
-        for blk_num in range(from_block, latest + 1):
-            try:
-                blk = await asyncio.to_thread(w3.eth.get_block, blk_num)
-            except Exception:
-                continue
-            for tx_hash_hex in getattr(blk, "transactions", []) or []:
-                try:
-                    tx = await asyncio.to_thread(w3.eth.get_transaction, tx_hash_hex)
-                except Exception:
-                    continue
-                to_addr = tx.get("to") or ""
-                if to_addr and to_addr.lower() == wallet.lower():
-                    amount = float(w3.from_wei(tx.get("value", 0), "ether"))
-                    if amount >= min_amount * (1 - AMOUNT_TOLERANCE):
-                        results.append({
-                            "tx_hash": w3.to_hex(tx_hash_hex),
-                            "amount": amount,
-                            "from_address": tx.get("from") or "",
-                        })
-                        if len(results) >= limit:
-                            return results
-        return results
-
-    # ERC20 via eth_getLogs (scan ±1000 blok terakhir)
-    token_address = (sender.config.get("tokens") or {}).get(symbol_upper)
-    if not token_address:
-        return []
-    padded = "0x" + wallet.lower()[2:].zfill(64)
-    try:
-        logs = await asyncio.to_thread(
-            w3.eth.get_logs,
-            {
-                "fromBlock": max(0, latest - 1000),
-                "toBlock": "latest",
-                "address": w3.to_checksum_address(token_address),
-                "topics": [TRANSFER_TOPIC, None, padded],
-            },
-        )
-    except Exception as exc:
-        logger.warning("getLogs gagal %s: %s", network, exc)
-        return []
-
-    decimals = _erc20_decimals(w3, w3.to_checksum_address(token_address), network)
-    for log in logs[-limit:]:
-        topics = getattr(log, "topics", None) or []
-        from_hex = topics[1].hex()[-40:] if len(topics) > 1 else ""
+    for attempt in range(len(sender.rpc_list)):
+        w3 = sender.w3
         try:
-            amount = _log_data_to_int(getattr(log, "data", "0x0")) / (10 ** decimals)
-        except Exception:
-            amount = 0.0
-        if amount >= min_amount * (1 - AMOUNT_TOLERANCE):
-            txh = getattr(log, "transactionHash", None)
-            results.append({
-                "tx_hash": txh.hex() if txh else "",
-                "amount": amount,
-                "from_address": "0x" + from_hex,
-            })
+            latest = await asyncio.to_thread(lambda: w3.eth.block_number)
+            if symbol_upper == native_sym:
+                from_block = max(0, latest - 30)
+                for blk_num in range(from_block, latest + 1):
+                    try:
+                        blk = await asyncio.to_thread(w3.eth.get_block, blk_num)
+                    except Exception:
+                        continue
+                    for tx_hash_hex in getattr(blk, "transactions", []) or []:
+                        try:
+                            tx = await asyncio.to_thread(w3.eth.get_transaction, tx_hash_hex)
+                        except Exception:
+                            continue
+                        to_addr = tx.get("to") or ""
+                        if to_addr and to_addr.lower() == wallet.lower():
+                            amount = float(w3.from_wei(tx.get("value", 0), "ether"))
+                            if amount >= min_amount * (1 - AMOUNT_TOLERANCE):
+                                results.append({
+                                    "tx_hash": w3.to_hex(tx_hash_hex),
+                                    "amount": amount,
+                                    "from_address": tx.get("from") or "",
+                                })
+                                if len(results) >= limit:
+                                    return results
+                return results
+            else:
+                # ERC20 via eth_getLogs (scan ±2000 blok terakhir)
+                token_address = (sender.config.get("tokens") or {}).get(symbol_upper)
+                if not token_address:
+                    return []
+                padded = "0x" + wallet.lower()[2:].zfill(64)
+                logs = await asyncio.to_thread(
+                    w3.eth.get_logs,
+                    {
+                        "fromBlock": max(0, latest - 2000),
+                        "toBlock": "latest",
+                        "address": w3.to_checksum_address(token_address),
+                        "topics": [TRANSFER_TOPIC, None, padded],
+                    },
+                )
+                decimals = _erc20_decimals(w3, w3.to_checksum_address(token_address), network)
+                for log in logs[-limit:]:
+                    topics = getattr(log, "topics", None) or []
+                    from_hex = topics[1].hex()[-40:] if len(topics) > 1 else ""
+                    try:
+                        amount = _log_data_to_int(getattr(log, "data", "0x0")) / (10 ** decimals)
+                    except Exception:
+                        amount = 0.0
+                    if amount >= min_amount * (1 - AMOUNT_TOLERANCE):
+                        txh = getattr(log, "transactionHash", None)
+                        txh_str = txh.hex() if hasattr(txh, "hex") else (w3.to_hex(txh) if txh else "")
+                        results.append({
+                            "tx_hash": txh_str,
+                            "amount": amount,
+                            "from_address": "0x" + from_hex,
+                        })
+                return results
+        except Exception as exc:
+            logger.warning(f"Gagal scan incoming EVM {network} via RPC {sender.rpc_list[sender.current_rpc_index]}: {exc}")
+            if attempt < len(sender.rpc_list) - 1:
+                sender._rotate_rpc()
+            else:
+                return []
     return results
 
 

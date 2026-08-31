@@ -512,19 +512,24 @@ async def input_deposit_hash(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def _notify_admin_deposit_pending(order, deposit_proof, photo_file_id, context):
-    """Notifikasi informatif ke admin (tanpa tombol approve — flow full otomatis)."""
+    """Notifikasi informatif ke admin dilengkapi tombol Approve jika verifikasi instan dibutuhkan."""
     try:
         admin_msg = (
-            f"📥 <b>[DEPOSIT MENUNGGU VERIFIKASI OTOMATIS]</b>\n\n"
+            f"📥 <b>[DEPOSIT SETORAN SWAP DITERIMA]</b>\n\n"
             f"ID Order: <code>{order.order_id}</code>\n"
             f"User: <code>{order.telegram_id}</code>\n"
-            f"Deposit: {order.crypto_amount} {order.crypto_symbol} ({order.network})\n"
-            f"Tujuan: {order.target_crypto_amount} {order.target_crypto_symbol} "
-            f"({order.target_network})\n"
+            f"Deposit Asal: <b>{order.crypto_amount} {order.crypto_symbol}</b> ({order.network})\n"
+            f"Koin Tujuan: <b>{order.target_crypto_amount} {order.target_crypto_symbol}</b> ({order.target_network})\n"
+            f"Wallet Tujuan: <code>{order.buyer_wallet}</code>\n"
             f"Bukti/TX Hash: <code>{deposit_proof}</code>\n\n"
-            f"ℹ️ Deposit akan diverifikasi otomatis di blockchain. "
-            f"Jika sudah terverifikasi, koin tujuan akan dikirim otomatis."
+            f"ℹ️ <i>Bot memverifikasi on-chain otomatis. Admin juga dapat menekan tombol di bawah untuk langsung menyetujui & mengeksekusi pengiriman koin tujuan secara instan.</i>"
         )
+        admin_keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("⚡ Approve & Eksekusi Payout", callback_data=f"admin_approve_swap_{order.order_id}"),
+                InlineKeyboardButton("❌ Tolak", callback_data=f"admin_reject_swap_{order.order_id}")
+            ]
+        ])
         if photo_file_id:
             try:
                 await context.bot.send_photo(
@@ -532,6 +537,7 @@ async def _notify_admin_deposit_pending(order, deposit_proof, photo_file_id, con
                     photo=photo_file_id,
                     caption=admin_msg,
                     parse_mode="HTML",
+                    reply_markup=admin_keyboard
                 )
             except Exception:
                 for admin_id in settings.ADMIN_CHAT_IDS:
@@ -541,11 +547,12 @@ async def _notify_admin_deposit_pending(order, deposit_proof, photo_file_id, con
                             photo=photo_file_id,
                             caption=admin_msg,
                             parse_mode="HTML",
+                            reply_markup=admin_keyboard
                         )
                     except Exception:
                         pass
         else:
-            await notify_admins(context.bot, admin_msg)
+            await notify_admins(context.bot, admin_msg, reply_markup=admin_keyboard)
     except Exception as admin_err:
         logger.error(f"Error sending admin notification for swap proof: {admin_err}")
 
