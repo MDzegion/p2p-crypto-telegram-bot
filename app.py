@@ -82,9 +82,5 @@ with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
     refresh_btn = gr.Button("🔄 Refresh Status")
     refresh_btn.click(fn=get_status, outputs=status_output)
 
-demo.launch(server_name="0.0.0.0", server_port=7860)
-
-# Keep process alive 24/7
-while True:
-    time.sleep(3600)
+demo.queue().launch(server_name="0.0.0.0", server_port=7860)
 
