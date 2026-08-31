@@ -15,7 +15,9 @@ RUN apt-get update && apt-get install -y \
     && npm install -g pm2 \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+# Hugging Face Space user (UID 1000)
+RUN useradd -m -u 1000 user
+WORKDIR /home/user/app
 
 # 2. Install Python dependencies
 COPY requirements.txt .
@@ -25,11 +27,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY gopay-gateway/package*.json ./gopay-gateway/
 RUN cd gopay-gateway && npm install --production
 
-# 4. Copy codebase
-COPY . .
+# 4. Copy entire codebase & set permissions
+COPY --chown=user:user . .
+RUN chmod +x start.sh
 
-# Expose GoPay Gateway Port
-EXPOSE 3005
+USER user
+EXPOSE 7860 3005
 
-# 5. Start dual services via PM2 Runtime
-CMD ["pm2-runtime", "start", "ecosystem.config.js"]
+CMD ["./start.sh"]
