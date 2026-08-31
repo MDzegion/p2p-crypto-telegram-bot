@@ -65,9 +65,13 @@ COINGECKO_IDS = {
     "ETH_ROBINHOOD": "ethereum",
 }
 
-
-# Binance API base URL
-BINANCE_API_URL = "https://api.binance.com/api/v3/ticker/price"
+# Binance API endpoints (data-api.binance.vision tidak terkena geoblock cloud US/EU)
+BINANCE_API_ENDPOINTS = [
+    "https://data-api.binance.vision/api/v3/ticker/price",
+    "https://api1.binance.com/api/v3/ticker/price",
+    "https://api2.binance.com/api/v3/ticker/price",
+    "https://api.binance.com/api/v3/ticker/price",
+]
 
 # CoinGecko API base URL (free, no key needed)
 COINGECKO_API_URL = "https://api.coingecko.com/api/v3/simple/price"
@@ -118,59 +122,37 @@ class PriceService:
         Ambil harga satu pair dari Binance API.
         Return None jika gagal (pair tidak ada, network error, dll).
         """
-        # Cek cache dulu — kalau masih fresh, pakai cache
         cached = self._cache.get(pair)
-        if cached and (time.time() - cached["timestamp"]) < CACHE_TTL_SECONDS:
+        if cached and (time.time() - cached["timestamp"] < CACHE_TTL_SECONDS):
             return cached["price"]
 
-        # Circuit breaker check: jika Binance offline, bypass langsung ke fallback
-        if not self.binance_online and (time.time() - self.binance_last_checked) < 300:
-            logger.debug(f"Binance offline (circuit breaker). Skip fetch {pair}.")
-            if cached:
-                return cached["price"]
-            return None
+        client = await self._get_client()
+        for endpoint in BINANCE_API_ENDPOINTS:
+            try:
+                response = await client.get(
+                    endpoint,
+                    params={"symbol": pair},
+                    timeout=3.0
+                )
+                response.raise_for_status()
+                data = response.json()
+                price = float(data["price"])
 
-        try:
-            client = await self._get_client()
-            response = await client.get(
-                BINANCE_API_URL,
-                params={"symbol": pair},
-                timeout=2.0 # Binance timeout cepat 2 detik
-            )
-            response.raise_for_status()
+                self.binance_online = True
+                self._cache[pair] = {
+                    "price": price,
+                    "timestamp": time.time(),
+                }
+                return price
+            except Exception as e:
+                continue
 
-            data = response.json()
-            price = float(data["price"])
-
-            # Set Binance online kembali jika sukses
-            self.binance_online = True
-
-            # Simpan ke cache
-            self._cache[pair] = {
-                "price": price,
-                "timestamp": time.time(),
-            }
-
-            return price
-
-        except httpx.HTTPStatusError as e:
-            logger.warning(f"Binance API error untuk pair {pair}: HTTP {e.response.status_code}")
-            # Tandai Binance offline karena error HTTP
-            self.binance_online = False
-            self.binance_last_checked = time.time()
-            if cached:
-                logger.info(f"Pakai cached price untuk {pair} (stale).")
-                return cached["price"]
-            return None
-
-        except Exception as e:
-            logger.error(f"Gagal fetch harga dari Binance ({pair}): {e}")
-            # Tandai Binance offline karena network error / timeout
-            self.binance_online = False
-            self.binance_last_checked = time.time()
-            if cached:
-                return cached["price"]
-            return None
+        logger.warning(f"Semua Binance endpoint gagal untuk pair {pair}.")
+        self.binance_online = False
+        self.binance_last_checked = time.time()
+        if cached:
+            return cached["price"]
+        return None
 
     # ============================================================
     # COINGECKO FALLBACK — Untuk token yang nggak ada di Binance
