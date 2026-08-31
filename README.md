@@ -1,3 +1,14 @@
+---
+title: P2P Crypto Telegram Bot
+emoji: 🚀
+colorFrom: indigo
+colorTo: blue
+sdk: gradio
+sdk_version: 4.20.0
+app_file: app.py
+pinned: false
+---
+
 # 🚀 P2P Crypto Trading Telegram Bot & GoPay Gateway
 
 Bot Telegram P2P Crypto Exchange otomatis dengan dukungan multi-chain (EVM, Solana, TRON, TON, Sui, Aptos), integrasi pembayaran QRIS dinamis via GoPay/GoBiz Partner Gateway, verifikasi on-chain instan, dan sistem deteksi pembayaran otomatis.
