@@ -1,8 +1,11 @@
 import os
 from dotenv import load_dotenv
 
-# Load .env file
-load_dotenv()
+# Load .env file only if exists without overriding container environment
+if os.path.exists(".env"):
+    load_dotenv(".env", override=False)
+elif os.path.exists("../.env"):
+    load_dotenv("../.env", override=False)
 
 class Settings:
     # Telegram settings
@@ -38,28 +41,27 @@ class Settings:
     GRAVITY_RPC = (os.getenv("GRAVITY_RPC", "https://rpc.gravity.xyz") or "").strip()
 
     # Non-EVM RPCs & Wallets
+    SOL_RPC = (os.getenv("SOL_RPC", "https://api.mainnet-beta.solana.com") or "").strip()
     SOL_PRIVATE_KEY = (os.getenv("SOL_PRIVATE_KEY") or "").strip()
     SOL_WALLET_ADDRESS = (os.getenv("SOL_WALLET_ADDRESS") or "").strip()
 
+    TRX_RPC = (os.getenv("TRX_RPC", "https://api.trongrid.io") or "").strip()
     TRX_PRIVATE_KEY = (os.getenv("TRX_PRIVATE_KEY") or "").strip()
     TRX_WALLET_ADDRESS = (os.getenv("TRX_WALLET_ADDRESS") or "").strip()
 
-    TON_RPC = (os.getenv("TON_RPC", "https://toncenter.com/api/v2/jsonRPC") or "").strip()
-    TON_API_KEY = (os.getenv("TON_API_KEY") or "").strip()
-    TON_WALLET_ADDRESS = (os.getenv("TON_WALLET_ADDRESS") or "").strip()
-    TON_PRIVATE_KEY = (os.getenv("TON_PRIVATE_KEY") or "").strip()
-
     SUI_RPC = (os.getenv("SUI_RPC", "https://fullnode.mainnet.sui.io:443") or "").strip()
+    SUI_PRIVATE_KEY = (os.getenv("SUI_PRIVATE_KEY") or "").strip()
     SUI_WALLET_ADDRESS = (os.getenv("SUI_WALLET_ADDRESS") or "").strip()
 
-    APTOS_RPC = (os.getenv("APTOS_RPC", "https://fullnode.mainnet.aptos.labs.com/v1") or "").strip()
-    APTOS_WALLET_ADDRESS = (os.getenv("APTOS_WALLET_ADDRESS") or "").strip()
+    TON_RPC = (os.getenv("TON_RPC", "https://toncenter.com/api/v2/jsonRPC") or "").strip()
+    TON_API_KEY = (os.getenv("TON_API_KEY") or "").strip()
+    TON_PRIVATE_KEY = (os.getenv("TON_PRIVATE_KEY") or "").strip()
+    TON_WALLET_ADDRESS = (os.getenv("TON_WALLET_ADDRESS") or "").strip()
 
-    # Business Rules
+    APTOS_RPC = (os.getenv("APTOS_RPC", "https://fullnode.mainnet.aptoslabs.com/v1") or "").strip()
+
+    # App logic configurations
     ORDER_EXPIRE_MINUTES = int(os.getenv("ORDER_EXPIRE_MINUTES", 30))
-    DEFAULT_SPREAD_PCT = float(os.getenv("DEFAULT_SPREAD_PCT", 0.0))
-    ENABLE_LOW_BALANCE_ALERT = os.getenv("ENABLE_LOW_BALANCE_ALERT", "true").lower() in ("true", "1", "yes")
-    LOW_BALANCE_ALERT_HOURS = int(os.getenv("LOW_BALANCE_ALERT_HOURS", 6))
+    DEFAULT_SPREAD_PCT = float(os.getenv("DEFAULT_SPREAD_PCT", 1.5))
 
-settings = Settings()
-
+print(f"🔑 [CONFIG] Token Bot Terdeteksi: {bool(Settings.TELEGRAM_BOT_TOKEN)} (Panjang: {len(Settings.TELEGRAM_BOT_TOKEN)})")
