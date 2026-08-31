@@ -62,6 +62,7 @@ class Settings:
 
     # App logic configurations
     ORDER_EXPIRE_MINUTES = int(os.getenv("ORDER_EXPIRE_MINUTES", 30))
-    DEFAULT_SPREAD_PCT = float(os.getenv("DEFAULT_SPREAD_PCT", 1.5))
+settings = Settings()
 
-print(f"🔑 [CONFIG] Token Bot Terdeteksi: {bool(Settings.TELEGRAM_BOT_TOKEN)} (Panjang: {len(Settings.TELEGRAM_BOT_TOKEN)})")
+print(f"[CONFIG] Token Bot Terdeteksi: {bool(settings.TELEGRAM_BOT_TOKEN)} (Panjang: {len(settings.TELEGRAM_BOT_TOKEN)})")
+
