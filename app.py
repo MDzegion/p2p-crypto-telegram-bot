@@ -79,3 +79,5 @@ with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
     refresh_btn.click(fn=get_status, outputs=status_output)
 
 demo.launch()
+demo.block_thread()
+
