@@ -78,5 +78,4 @@ with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
     refresh_btn = gr.Button("🔄 Refresh Status")
     refresh_btn.click(fn=get_status, outputs=status_output)
 
-if __name__ == "__main__":
-    demo.launch()
+demo.launch(ssr_mode=False, server_name="0.0.0.0", server_port=7860)
