@@ -420,11 +420,11 @@ def setup_scheduler():
     )
 
     # --- Low Balance Alert (configurable, default every 6 hours) ---
-    if settings.ENABLE_LOW_BALANCE_ALERT:
+    if getattr(settings, "ENABLE_LOW_BALANCE_ALERT", False):
         scheduler.add_job(
             _job_low_balance_alert,
             "interval",
-            hours=settings.LOW_BALANCE_ALERT_HOURS,
+            hours=int(getattr(settings, "LOW_BALANCE_ALERT_HOURS", 6)),
             id="low_balance_alert",
             name="Alert admins if wallet balance is low",
             max_instances=1,
