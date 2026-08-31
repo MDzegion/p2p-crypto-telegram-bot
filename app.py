@@ -9,27 +9,32 @@ import subprocess
 import threading
 import time
 from fastapi import FastAPI
+import gradio as gr
 import uvicorn
 
-app = FastAPI(title="P2P Crypto Telegram Bot Monitor")
+app = FastAPI(title="P2P Crypto Bot Live Monitor")
 
-@app.get("/")
-def root():
-    return {
-        "status": "online",
-        "service": "P2P Crypto Telegram Bot",
-        "gopay_gateway": "active_port_3005",
-        "bot_polling": "active",
-        "uptime": "24/7 cloud live"
-    }
+def get_status():
+    return "🟢 Status: ACTIVE 24/7\n• Telegram Bot: Polling Active\n• GoPay Gateway: Active (Port 3005)\n• On-chain Monitor: Running (20s interval)"
 
-@app.get("/healthz")
-def health():
-    return {"status": "ok"}
+with gr.Blocks(title="P2P Crypto Telegram Bot") as demo:
+    gr.Markdown("# 🤖 P2P Crypto Telegram Bot — Live Server")
+    gr.Markdown("Servis Bot Telegram dan GoPay Gateway berjalan aktif 24 jam nonstop di cloud.")
+    
+    status_output = gr.Textbox(
+        label="Service Status",
+        value=get_status(),
+        interactive=False,
+        lines=4
+    )
+    refresh_btn = gr.Button("🔄 Refresh Status")
+    refresh_btn.click(fn=get_status, outputs=status_output)
+
+# Mount Gradio langsung ke FastAPI pada root path (memenuhi semua endpoint /config dan SSR Gradio)
+app = gr.mount_gradio_app(app, demo, path="/")
 
 def run_services():
     """Worker background untuk inisialisasi dan menjalankan servis."""
-    # Beri jeda 3 detik agar uvicorn server di port 7860 sudah bind dan siap merespons healthcheck Space
     time.sleep(3)
     print("🚀 [STARTUP] Memulai inisialisasi background services...")
 
