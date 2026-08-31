@@ -391,7 +391,7 @@ async def handle_payment_selection(update: Update, context: ContextTypes.DEFAULT
     summary_text += f"\n💳 <b>Metode Pembayaran:</b> {method_label}"
     if method_code == "GOPAY_QRIS":
         summary_text += (
-            "\nℹ️ <i>Kode unik (1-99) akan ditambahkan ke total bayar "
+            "\nℹ️ <i>Kode unik (1-999) akan ditambahkan ke total bayar "
             "untuk verifikasi otomatis.</i>"
         )
     
