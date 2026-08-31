@@ -6,54 +6,54 @@ load_dotenv()
 
 class Settings:
     # Telegram settings
-    TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+    TELEGRAM_BOT_TOKEN = (os.getenv("TELEGRAM_BOT_TOKEN") or "").strip()
     _admin_env = os.getenv("ADMIN_CHAT_IDS") or os.getenv("ADMIN_CHAT_ID") or ""
     ADMIN_CHAT_IDS = [int(x.strip()) for x in _admin_env.split(",") if x.strip()]
-    OWNER_USERNAME = os.getenv("OWNER_USERNAME", "TimRobbyPR")
+    OWNER_USERNAME = (os.getenv("OWNER_USERNAME", "TimRobbyPR") or "").strip()
 
     # Server settings
-    DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./p2p_bot.db")  # Default to SQLite for easy development
+    DATABASE_URL = (os.getenv("DATABASE_URL", "sqlite:///./p2p_bot.db") or "").strip()
     PORT = int(os.getenv("PORT", 8000))
 
     # GoPay / Gopiz API Gateway
-    GOPAY_GATEWAY_URL = os.getenv("GOPAY_GATEWAY_URL", "http://127.0.0.1:3005")
-    GOPAY_API_KEY = os.getenv("GOPAY_API_KEY", "RAHASIA")
+    GOPAY_GATEWAY_URL = (os.getenv("GOPAY_GATEWAY_URL", "http://127.0.0.1:3005") or "").strip()
+    GOPAY_API_KEY = (os.getenv("GOPAY_API_KEY", "RAHASIA") or "").strip()
 
     # Wallets & RPC Endpoints
-    EVM_PRIVATE_KEY = os.getenv("EVM_PRIVATE_KEY")
-    EVM_WALLET_ADDRESS = os.getenv("EVM_WALLET_ADDRESS")
+    EVM_PRIVATE_KEY = (os.getenv("EVM_PRIVATE_KEY") or "").strip()
+    EVM_WALLET_ADDRESS = (os.getenv("EVM_WALLET_ADDRESS") or "").strip()
     
     # EVM RPC Endpoints
-    BSC_RPC = os.getenv("BSC_RPC", "https://bsc-rpc.publicnode.com")
-    ETH_RPC = os.getenv("ETH_RPC", "https://ethereum-rpc.publicnode.com")
-    AVAX_RPC = os.getenv("AVAX_RPC", "https://avalanche-c-chain-rpc.publicnode.com")
-    POLYGON_RPC = os.getenv("POLYGON_RPC", "https://polygon-bor-rpc.publicnode.com")
-    BASE_RPC = os.getenv("BASE_RPC", "https://base-rpc.publicnode.com")
-    ARB_RPC = os.getenv("ARB_RPC", "https://arbitrum-one-rpc.publicnode.com")
-    OPTIMISM_RPC = os.getenv("OPTIMISM_RPC", "https://optimism-rpc.publicnode.com")
-    ROBINHOOD_RPC = os.getenv("ROBINHOOD_RPC", "https://rpc.robinhood.com")
-    KAIA_RPC = os.getenv("KAIA_RPC", "https://klaytn.drpc.org")
-    BERA_RPC = os.getenv("BERA_RPC", "https://berachain.drpc.org")
-    HYPEREVM_RPC = os.getenv("HYPEREVM_RPC", "https://rpc.hyperliquid.xyz/evm")
-    GRAVITY_RPC = os.getenv("GRAVITY_RPC", "https://rpc.gravity.xyz")
+    BSC_RPC = (os.getenv("BSC_RPC", "https://bsc-rpc.publicnode.com") or "").strip()
+    ETH_RPC = (os.getenv("ETH_RPC", "https://ethereum-rpc.publicnode.com") or "").strip()
+    AVAX_RPC = (os.getenv("AVAX_RPC", "https://avalanche-c-chain-rpc.publicnode.com") or "").strip()
+    POLYGON_RPC = (os.getenv("POLYGON_RPC", "https://polygon-bor-rpc.publicnode.com") or "").strip()
+    BASE_RPC = (os.getenv("BASE_RPC", "https://base-rpc.publicnode.com") or "").strip()
+    ARB_RPC = (os.getenv("ARB_RPC", "https://arbitrum-one-rpc.publicnode.com") or "").strip()
+    OPTIMISM_RPC = (os.getenv("OPTIMISM_RPC", "https://optimism-rpc.publicnode.com") or "").strip()
+    ROBINHOOD_RPC = (os.getenv("ROBINHOOD_RPC", "https://rpc.robinhood.com") or "").strip()
+    KAIA_RPC = (os.getenv("KAIA_RPC", "https://klaytn.drpc.org") or "").strip()
+    BERA_RPC = (os.getenv("BERA_RPC", "https://berachain.drpc.org") or "").strip()
+    HYPEREVM_RPC = (os.getenv("HYPEREVM_RPC", "https://rpc.hyperliquid.xyz/evm") or "").strip()
+    GRAVITY_RPC = (os.getenv("GRAVITY_RPC", "https://rpc.gravity.xyz") or "").strip()
 
     # Non-EVM RPCs & Wallets
-    SOL_PRIVATE_KEY = os.getenv("SOL_PRIVATE_KEY")
-    SOL_WALLET_ADDRESS = os.getenv("SOL_WALLET_ADDRESS")
+    SOL_PRIVATE_KEY = (os.getenv("SOL_PRIVATE_KEY") or "").strip()
+    SOL_WALLET_ADDRESS = (os.getenv("SOL_WALLET_ADDRESS") or "").strip()
 
-    TRX_PRIVATE_KEY = os.getenv("TRX_PRIVATE_KEY")
-    TRX_WALLET_ADDRESS = os.getenv("TRX_WALLET_ADDRESS")
+    TRX_PRIVATE_KEY = (os.getenv("TRX_PRIVATE_KEY") or "").strip()
+    TRX_WALLET_ADDRESS = (os.getenv("TRX_WALLET_ADDRESS") or "").strip()
 
-    TON_RPC = os.getenv("TON_RPC", "https://toncenter.com/api/v2/jsonRPC")
-    TON_API_KEY = os.getenv("TON_API_KEY")
-    TON_WALLET_ADDRESS = os.getenv("TON_WALLET_ADDRESS")
-    TON_PRIVATE_KEY = os.getenv("TON_PRIVATE_KEY")
+    TON_RPC = (os.getenv("TON_RPC", "https://toncenter.com/api/v2/jsonRPC") or "").strip()
+    TON_API_KEY = (os.getenv("TON_API_KEY") or "").strip()
+    TON_WALLET_ADDRESS = (os.getenv("TON_WALLET_ADDRESS") or "").strip()
+    TON_PRIVATE_KEY = (os.getenv("TON_PRIVATE_KEY") or "").strip()
 
-    SUI_RPC = os.getenv("SUI_RPC", "https://fullnode.mainnet.sui.io:443")
-    SUI_WALLET_ADDRESS = os.getenv("SUI_WALLET_ADDRESS")
+    SUI_RPC = (os.getenv("SUI_RPC", "https://fullnode.mainnet.sui.io:443") or "").strip()
+    SUI_WALLET_ADDRESS = (os.getenv("SUI_WALLET_ADDRESS") or "").strip()
 
-    APTOS_RPC = os.getenv("APTOS_RPC", "https://fullnode.mainnet.aptos.labs.com/v1")
-    APTOS_WALLET_ADDRESS = os.getenv("APTOS_WALLET_ADDRESS")
+    APTOS_RPC = (os.getenv("APTOS_RPC", "https://fullnode.mainnet.aptos.labs.com/v1") or "").strip()
+    APTOS_WALLET_ADDRESS = (os.getenv("APTOS_WALLET_ADDRESS") or "").strip()
 
     # Business Rules
     ORDER_EXPIRE_MINUTES = int(os.getenv("ORDER_EXPIRE_MINUTES", 30))
