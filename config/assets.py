@@ -6,6 +6,8 @@ Semua pasangan yang bisa dibeli/dijual user harus terdaftar di sini agar
 stoknya muncul dengan nominal asli di fitur "Cek Stok".
 """
 
+import os
+
 # Pasangan (SYMBOL, NETWORK) yang stoknya disinkronkan dari blockchain.
 # Termasuk native coin tiap chain + token yang diperjualbelikan bot.
 STOCK_ASSETS = [
@@ -57,5 +59,21 @@ NON_EVM_TOKENS = {
     },
 }
 
-# Gambar QRIS Statis merchant (dikirim ke user untuk pembayaran manual).
-QRIS_STATIC_IMAGE = "Qris statis.jpeg"
+_BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def get_qris_static_image_path() -> str | None:
+    """Mencari path absolut file gambar QRIS statis."""
+    candidates = [
+        os.path.join(_BASE_DIR, "Qris statis.jpeg"),
+        os.path.join(_BASE_DIR, "Qris statis.jpg"),
+        os.path.join(_BASE_DIR, "qris_statis.jpeg"),
+        os.path.join(_BASE_DIR, "qris statis.jpeg"),
+        "Qris statis.jpeg",
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+# Gambar QRIS Statis merchant (fallback path)
+QRIS_STATIC_IMAGE = get_qris_static_image_path() or "Qris statis.jpeg"

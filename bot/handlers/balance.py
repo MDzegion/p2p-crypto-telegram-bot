@@ -201,13 +201,30 @@ async def generate_and_send_qris(update: Update, context: ContextTypes.DEFAULT_T
     except Exception:
         pass
 
-    await context.bot.send_photo(
-        chat_id=user.id,
-        photo=QRIS_STATIC_IMAGE,
-        caption=caption_text,
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+    from config.assets import get_qris_static_image_path
+    qris_path = get_qris_static_image_path()
+    sent = False
+    if qris_path and os.path.exists(qris_path):
+        try:
+            with open(qris_path, "rb") as qf:
+                await context.bot.send_photo(
+                    chat_id=user.id,
+                    photo=qf,
+                    caption=caption_text,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+                sent = True
+        except Exception as pe:
+            logger.warning(f"Gagal upload QRIS photo topup: {pe}")
+    
+    if not sent:
+        await context.bot.send_message(
+            chat_id=user.id,
+            text=caption_text,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     return ConversationHandler.END
 
