@@ -631,8 +631,11 @@ async function verifyPayment(amount, startTime, merchantIdOverride = null, userA
                     payment_type: tx.payment_type || tx.transaction_source || 'GOPAY_INSTORE',
                     transaction_time: tx.transaction_time || tx.settlement_time
                 };
-            } else if (existingClaim.qrisId === currentScope) {
-                // Re-check dari QRIS/Scope yang sama → kembalikan hasil yang sudah diklaim
+            } else if (existingClaim.qrisId === currentScope || existingClaim.qrisId === 'default' || currentScope === 'default') {
+                // Re-check dari QRIS/Scope yang sama atau klaim default → perbarui scope jika perlu
+                if (currentScope !== 'default') {
+                    existingClaim.qrisId = currentScope;
+                }
                 return {
                     transaction_id: txId,
                     order_id: tx.order_id,
@@ -642,7 +645,7 @@ async function verifyPayment(amount, startTime, merchantIdOverride = null, userA
                     transaction_time: tx.transaction_time || tx.settlement_time
                 };
             } else {
-                // Transaksi ini sudah diklaim oleh QRIS lain → skip, cari transaksi berikutnya
+                // Transaksi ini sudah diklaim oleh QRIS spesifik lain → skip
                 logActivity('INFO', `TRX ${txId} sudah diklaim oleh QRIS ${existingClaim.qrisId}, skip untuk QRIS ${currentScope}`);
                 continue;
             }

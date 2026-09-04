@@ -558,20 +558,19 @@ async def handle_order_confirmation(update: Update, context: ContextTypes.DEFAUL
                 [InlineKeyboardButton("🔙 Menu Utama", callback_data="menu_back")],
                 [get_owner_button()]
             ]
-            from config.assets import get_qris_static_image_path
-            qris_path = get_qris_static_image_path()
+            from services.qris_generator import get_qris_image_stream
+            qris_stream = get_qris_image_stream(final_total_idr)
             sent = False
-            if qris_path and os.path.exists(qris_path):
+            if qris_stream:
                 try:
-                    with open(qris_path, "rb") as qf:
-                        await context.bot.send_photo(
-                            chat_id=user_id,
-                            photo=qf,
-                            caption=caption,
-                            parse_mode="HTML",
-                            reply_markup=InlineKeyboardMarkup(keyboard)
-                        )
-                        sent = True
+                    await context.bot.send_photo(
+                        chat_id=user_id,
+                        photo=qris_stream,
+                        caption=caption,
+                        parse_mode="HTML",
+                        reply_markup=InlineKeyboardMarkup(keyboard)
+                    )
+                    sent = True
                 except Exception as pe:
                     logger.warning(f"Gagal upload QRIS photo: {pe}")
             

@@ -777,6 +777,24 @@ async def _job_send_monthly_report():
         logger.error("Monthly report job failed: %s", exc, exc_info=True)
 
 
+def ensure_gateway_running():
+    """Memastikan GoPay Gateway (node server.js) berjalan di port 3005."""
+    import os
+    import socket
+    import subprocess
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    is_open = sock.connect_ex(('127.0.0.1', 3005)) == 0
+    sock.close()
+    if not is_open:
+        gateway_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gopay-gateway")
+        if os.path.exists(os.path.join(gateway_dir, "server.js")):
+            logger.info("🚀 [GATEWAY] Menjalankan GoPay Gateway (node server.js)...")
+            try:
+                subprocess.Popen(["node", "server.js"], cwd=gateway_dir)
+            except Exception as e:
+                logger.warning("Gagal auto-start gateway: %s", e)
+
+
 # =============================================================
 # 4. MAIN — BOT POLLING
 # =============================================================
@@ -785,6 +803,9 @@ async def main():
     Main coroutine: initialises everything and runs the Telegram bot
     until interrupted.
     """
+    # --- 0. Ensure GoPay Gateway is running ---
+    ensure_gateway_running()
+
     # --- 1. Init database ---
     init_database()
 

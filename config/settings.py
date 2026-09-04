@@ -21,6 +21,8 @@ class Settings:
     # GoPay / Gopiz API Gateway
     GOPAY_GATEWAY_URL = (os.getenv("GOPAY_GATEWAY_URL", "http://127.0.0.1:3005") or "").strip()
     GOPAY_API_KEY = (os.getenv("GOPAY_API_KEY", "RAHASIA") or "").strip()
+    GOPAY_MERCHANT_ID = (os.getenv("GOPAY_MERCHANT_ID") or "").strip()
+    QRIS_STATIC = (os.getenv("QRIS_STATIC") or "").strip()
 
     # Wallets & RPC Endpoints
     EVM_PRIVATE_KEY = (os.getenv("EVM_PRIVATE_KEY") or "").strip()

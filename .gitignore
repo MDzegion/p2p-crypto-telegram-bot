@@ -73,3 +73,9 @@ proofs/
 # ===========================
 docker-compose.override.yml
 
+# ===========================
+# Scratch / Temp scripts
+# ===========================
+scratch/
+
+
